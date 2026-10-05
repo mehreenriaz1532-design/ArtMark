@@ -1,11 +1,13 @@
 // Vercel serverless function: authorises a logged-in Artmark user for Pusher channels.
 // The Pusher SECRET lives only here (Vercel environment variable PUSHER_SECRET). It is never sent to the browser.
 const crypto = require('crypto');
+const pick = (...names) => { for (const n of names) { const v = process.env[n]; if (v) return v; } return ''; };
 const sign = (secret, str) => crypto.createHmac('sha256', secret).update(str).digest('hex');
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { PUSHER_KEY, PUSHER_SECRET, SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+  const PUSHER_KEY = pick('PUSHER_KEY', 'VITE_PUSHER_KEY', 'NEXT_PUBLIC_PUSHER_KEY'), PUSHER_SECRET = pick('PUSHER_SECRET', 'PUSHER_APP_SECRET');
+  const SUPABASE_URL = pick('SUPABASE_URL', 'VITE_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'), SUPABASE_ANON_KEY = pick('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
   if (!PUSHER_KEY || !PUSHER_SECRET || !SUPABASE_URL || !SUPABASE_ANON_KEY) return res.status(500).json({ error: 'Server is not configured' });
 
   // 1) Who is asking? Only logged-in users get access.
