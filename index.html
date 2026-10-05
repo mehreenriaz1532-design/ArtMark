@@ -370,8 +370,25 @@ code{background:var(--soft);padding:1px 6px;border-radius:5px;font-size:.85em;wo
 <!-- No keys are stored in this file. The page asks /api/config for the PUBLIC settings at start-up. -->
 <script>
 window.ARTMARK_CONFIG={SUPABASE_URL:"",SUPABASE_ANON_KEY:"",PUSHER_KEY:"",PUSHER_CLUSTER:"us2"};
-(function(){try{var x=new XMLHttpRequest();x.open("GET","/api/config",false);x.send();
-  if(x.status===200){var j=JSON.parse(x.responseText);for(var k in j){if(j[k])window.ARTMARK_CONFIG[k]=j[k]}}}catch(e){}})();
+window.artmarkBanner=function(msg){
+  function put(){if(document.getElementById("setupbanner"))return;var d=document.createElement("div");d.id="setupbanner";d.setAttribute("role","alert");
+    d.style.cssText="position:sticky;top:0;z-index:99;background:#B3412F;color:#fff;padding:10px 16px;font:600 14px/1.4 system-ui,sans-serif;text-align:center";
+    d.textContent="Setup problem: "+msg+" The site is running in demo mode, so logins and chat are NOT connected yet.";document.body.insertBefore(d,document.body.firstChild)}
+  if(document.body)put();else document.addEventListener("DOMContentLoaded",put)};
+(function(){
+  var cfg=window.ARTMARK_CONFIG,problem="",status=0,body={};
+  try{var x=new XMLHttpRequest();x.open("GET","/api/config",false);x.send();status=x.status;
+    try{body=JSON.parse(x.responseText)}catch(e){}
+    if(status===200){for(var k in body){if(body[k])cfg[k]=body[k]}}
+    else if(status===500){problem="the settings page /api/config returned an error ("+(body.error||"500")+")."}
+  }catch(e){}
+  if(status===200){
+    if(!cfg.SUPABASE_URL)problem="SUPABASE_URL is not set in Vercel (Settings > Environment Variables). Add it and redeploy.";
+    else if(!/^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z]{2,}\/?$/.test(cfg.SUPABASE_URL))problem="SUPABASE_URL in Vercel is not a web address. It currently starts with \""+String(cfg.SUPABASE_URL).slice(0,14)+"...\" but must look like https://xxxx.supabase.co. Fix it in Vercel > Settings > Environment Variables, then Redeploy.";
+    else if(!cfg.SUPABASE_ANON_KEY)problem="SUPABASE_ANON_KEY is not set in Vercel. Add it and redeploy.";
+  }
+  if(problem){window.ARTMARK_PROBLEM=problem;window.artmarkBanner(problem);cfg.SUPABASE_URL="";cfg.SUPABASE_ANON_KEY=""}
+})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
@@ -381,7 +398,7 @@ window.ARTMARK_CONFIG={SUPABASE_URL:"",SUPABASE_ANON_KEY:"",PUSHER_KEY:"",PUSHER
 (function(){
   var cfg=window.ARTMARK_CONFIG||{};
   if(!cfg.SUPABASE_URL||!cfg.SUPABASE_ANON_KEY||!window.supabase||!window.supabase.createClient)return;
-  var SB=window.SB=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+  var SB;try{SB=window.SB=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY)}catch(e){if(window.artmarkBanner)window.artmarkBanner('Supabase could not start ('+(e&&e.message||'error')+'). Check SUPABASE_URL and SUPABASE_ANON_KEY in Vercel.');return}
   var session=null;
   var ready=SB.auth.getSession().then(function(r){session=r.data.session}).catch(function(){});
   SB.auth.onAuthStateChange(function(ev,s){session=s});
