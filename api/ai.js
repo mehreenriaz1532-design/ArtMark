@@ -1,4 +1,4 @@
-// Vercel serverless function: AI art critic for Gemini API
+// Vercel serverless function: AI art critic with fallback models
 const pick = (...names) => { 
   for (const n of names) { 
     const v = process.env[n]; 
@@ -10,6 +10,7 @@ const pick = (...names) => {
 const hits = new Map();
 
 module.exports = async (req, res) => {
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -25,7 +26,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'Server environment variables missing', code: 'server_config' });
   }
 
-  // Auth Verification
+  // 1) Auth Check
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ error: 'Log in first', code: 'not_signed_in' });
 
@@ -37,52 +38,60 @@ module.exports = async (req, res) => {
     if (!who.ok) return res.status(401).json({ error: 'Session expired', code: 'not_signed_in' });
     const user = await who.json();
 
-    // Rate Limiting
+    // 2) Rate limit
     const now = Date.now();
     const list = (hits.get(user.id) || []).filter(t => now - t < 3600e3);
     if (list.length >= 20) return res.status(429).json({ error: 'Too many requests', code: 'rate_limited' });
     list.push(now); hits.set(user.id, list);
 
-    // Payload Parsing
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-    const turns = Array.isArray(body.turns) ? body.turns.slice(-12) : [];
-    if (!turns.length || turns[turns.length - 1].role !== 'user') {
-      return res.status(400).json({ error: 'Bad request: Missing user message' });
+    // 3) Parse Payload
+    let body = {};
+    if (typeof req.body === 'string') {
+      try { body = JSON.parse(req.body); } catch (e) { body = {}; }
+    } else {
+      body = req.body || {};
     }
 
-    const contents = turns.map(x => ({ 
-      role: x.role === 'assistant' ? 'model' : 'user', 
-      parts: [{ text: String(x.content || '').slice(0, 8000) }] 
-    }));
+    const turns = Array.isArray(body.turns) ? body.turns.slice(-12) : [];
+    const promptText = body.prompt || (turns.length ? turns[turns.length - 1].content : 'Please review my artwork.');
+
+    const contents = [{ role: 'user', parts: [{ text: String(promptText).slice(0, 8000) }] }];
 
     if (body.image) {
-      const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.image));
-      if (m && m[2].length <= 1_800_000) {
-        contents[contents.length - 1].parts.push({
+      const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.image));
+      if (m && m[2].length <= 4_000_000) {
+        contents[0].parts.push({
           inline_data: { mime_type: m[1], data: m[2] }
         });
       }
     }
 
-    // Direct Gemini 1.5 Flash Call
-   const model = pick('GEMINI_MODEL') || 'gemini-2.0-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${GEMINI_API_KEY.trim()}`;
+    // 4) Multi-Model Fallback Try (gemini-1.5-flash-latest -> gemini-2.0-flash -> gemini-1.5-pro)
+    const modelsToTry = ['gemini-1.5-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+    let lastError = null;
 
-    const r = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1600 } })
-    });
+    for (const modelName of modelsToTry) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY.trim()}`;
 
-    const j = await r.json();
-    if (!r.ok) {
-      return res.status(502).json({ error: j.error?.message || 'Gemini API Error', code: 'ai_error' });
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1000 } })
+      });
+
+      const j = await r.json();
+
+      if (r.ok) {
+        const text = j.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n');
+        if (text) {
+          return res.status(200).json({ text, reply: text, result: text });
+        }
+      } else {
+        lastError = j.error?.message || 'Gemini API Error';
+      }
     }
 
-    const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map(p => p.text || '').join('\n');
-    if (!text) return res.status(502).json({ error: 'The AI did not return an answer', code: 'ai_blocked' });
-
-    return res.status(200).json({ text, reply: text, result: text });
+    return res.status(502).json({ error: lastError || 'No valid AI response', code: 'ai_error' });
 
   } catch (e) {
     return res.status(502).json({ error: e.message || 'Could not reach AI service', code: 'ai_error' });
