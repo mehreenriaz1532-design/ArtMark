@@ -1,11 +1,20 @@
-// Open https://YOUR-SITE/api/health to check your setup. It shows only yes/no, never any secret.
-const pick = (...names) => { for (const n of names) { const v = process.env[n]; if (v) return v; } return ''; };
+// Open https://artmark-prime.vercel.app/api/health to check setup
 module.exports = (req, res) => {
-  const ai = pick('ANTHROPIC_API_KEY') ? 'anthropic' : pick('GEMINI_API_KEY') ? 'gemini' : 'none';
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnon = process.env.SUPABASE_ANON_KEY;
+  
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  
+  const pusherKey = process.env.PUSHER_KEY;
+  const pusherSecret = process.env.PUSHER_SECRET;
+
+  const aiProvider = geminiKey ? 'gemini' : anthropicKey ? 'anthropic' : 'none';
+
   res.status(200).json({
-    supabase_configured: !!(pick('SUPABASE_URL', 'VITE_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL') && pick('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY')),
-    ai_configured: ai !== 'none',
-    ai_provider: ai,
-    pusher_configured: !!(pick('PUSHER_KEY', 'VITE_PUSHER_KEY', 'NEXT_PUBLIC_PUSHER_KEY') && pick('PUSHER_SECRET', 'PUSHER_APP_SECRET'))
+    supabase_configured: !!(supabaseUrl && supabaseAnon),
+    ai_configured: aiProvider !== 'none',
+    ai_provider: aiProvider,
+    pusher_configured: !!(pusherKey && pusherSecret)
   });
 };
