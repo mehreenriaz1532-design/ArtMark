@@ -6,7 +6,18 @@ const hits = new Map(); // simple per-user limit (best effort on serverless)
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
-  if (!ANTHROPIC_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) return res.status(500).json({ error: 'Server is not configured', code: 'server_config' });
+if (!GEMINI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    const missing = [];
+    if (!GEMINI_API_KEY) missing.push('GEMINI_API_KEY');
+    if (!SUPABASE_URL) missing.push('SUPABASE_URL');
+    if (!SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
+    
+    return res.status(500).json({ 
+      error: 'Server environment variables missing', 
+      code: 'server_config',
+      missing_keys: missing 
+    });
+  }
 
   // 1) Only logged-in Artmark users may use the AI
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
