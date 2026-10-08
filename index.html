@@ -389,6 +389,7 @@ nav.main a::after{bottom:0}
   .aigrid{grid-template-columns:1fr 1fr}
 }
 @media (max-width:380px){.aigrid{grid-template-columns:1fr}}
+.stlist .strow{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.stlist .strow:last-child{border:0}.stic{font-size:1.2rem;flex:none}.sthint{font-size:.88rem;color:var(--mute);margin-top:2px}
 </style>
 </head>
 <body class="cat-all">
@@ -398,7 +399,7 @@ nav.main a::after{bottom:0}
   <div class="who" id="who"></div>
 </div></header>
 <main class="wrap" id="app"></main>
-<footer class="wrap">Artmark · rate, rank, chat and sell art. Chats are end-to-end encrypted. Artworks, listings and accounts shown in the gallery are stored in your own browser until a shared database is added for them.</footer>
+<footer class="wrap">Artmark · rate, rank, chat and sell art. Chats are end-to-end encrypted. Artworks and listings shown in the gallery are stored in your own browser until a shared database is added for them. · <a href="#/status">Setup check</a></footer>
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>
 
@@ -685,7 +686,7 @@ function render(){
   const r=route(),m=me();
   let page=r.page==='work'?'feed':r.page==='listing'?'market':(r.page==='join'||r.page==='dm')?'chat':r.page;
   if(r.page==='join'||r.page==='dm')C.pending={k:r.page,v:decodeURIComponent(r.arg||'')};
-  const pages={feed:pageFeed,challenges:pageChallenges,market:pageMarket,supplies:pageSupplies,commissions:pageCommissions,chat:pageChat,dashboard:pageDashboard,artist:pageArtist,ai:pageAI};
+  const pages={feed:pageFeed,challenges:pageChallenges,market:pageMarket,supplies:pageSupplies,commissions:pageCommissions,chat:pageChat,dashboard:pageDashboard,artist:pageArtist,ai:pageAI,status:pageStatus};
   document.body.className='cat-'+((page==='feed'||page==='challenges')?cat:'all');
   $('#app').innerHTML=(pages[page]||pageFeed)(r.arg);
   const un=unreadCount();
@@ -696,6 +697,7 @@ function render(){
   hookVideos();
   if(page==='chat'&&r.arg!=='contacts'){C.paneKey=null;C.paint();C.handlePending()}
   if(page==='ai')AI.afterRender();
+  if(page==='status')runStatus();
   document.querySelectorAll('.grid,.tiles,.hero').forEach(g=>[...g.children].forEach((el,i)=>el.style.setProperty('--n',Math.min(i,14))));
   linkChatId();try{if(localStorage.getItem('artmark_chat_on')==='1'&&!C.started)C.init()}catch(e){}
   if($('#modal').hidden){if(r.page==='work'&&getW(r.arg))workModal(r.arg);if(r.page==='listing'&&getL(r.arg))listingModal(r.arg)}
@@ -1055,6 +1057,8 @@ C.paintStatus=()=>{
   const el=$('#cstatus');if(!el)return;
   if(C.status==='live'){el.innerHTML=`<p class="small muted" style="margin:0 0 10px">Chatting as <b>${esc((C.pf[C.me]&&C.pf[C.me].name)||'you')}</b> · end-to-end encrypted · <button class="btn ghost sm" data-act="copytxt" data-v="${esc(C.me)}">Copy my chat ID</button></p>`;return}
   if(C.status==='init'){el.innerHTML='<div class="notice">Connecting to chat…</div>';return}
+  if(window.SB&&me()&&!me().sb){el.innerHTML='<div class="notice"><b>You are using an old demo account.</b><br>Live chat needs a real account. Log out, then sign up with your email and a password.<br><button class="btn sm" style="margin-top:8px" data-act="logout">Log out</button></div>';return}
+  if(window.SB&&me()){el.innerHTML=`<div class="notice"><b>Chat could not connect.</b><br>${C.err?'Reason: '+esc(C.err)+'. ':''}Open the <a href="#/status">Setup check</a> to see which part is missing.<br><button class="btn sm" style="margin-top:8px" data-act="cretry">Try again</button></div>`;return}
   if(window.SB&&!me()){el.innerHTML='<div class="notice"><b>Log in to chat.</b><br>Create an account or log in with your email and password, then you can message other artists and join groups.<br><button class="btn sm" style="margin-top:8px" data-act="authopen" data-t="login">Log in</button> <button class="btn ghost sm" style="margin-top:8px" data-act="authopen" data-t="signup">Sign up</button></div>';return}
   el.innerHTML=`<div class="notice"><b>Live chat is not connected in this view.</b><br>Real chat between people works on the published Artmark page when you are signed in to claude.ai and the owner shared the page with you as a <b>Contributor</b>. Open that published link and come back to Chat. ${C.err?`<br><span class="small">Reason: ${esc(C.err)}</span>`:''}<br><button class="btn sm" style="margin-top:8px" data-act="cretry">Try again</button></div>`;
 };
@@ -1489,7 +1493,7 @@ const SBA={
     });
     const {data}=await SB.auth.getSession();
     if(data.session){if(!me()||me().chatId!==data.session.user.id)SBA.onAuth(data.session,{silent:true})}
-    else{const u=me();if(u&&u.sb){db.session=null;save();render()}}
+    else{const u=me();if(u){db.session=null;save();C.reset();render();if(!u.sb)toast('The old demo account was signed out. Please sign up or log in with your email.')}}
   }
 };
 C.reset=()=>{
@@ -1497,6 +1501,49 @@ C.reset=()=>{
   Object.assign(C,{started:false,status:'init',cdb:null,usr:null,me:null,threads:[],pf:{},gname:{},prev:{},msgs:[],cur:null,unsubT:null,unsubM:null,kc:new Map(),gk:new Map(),unlocked:new Set(),prefs:{hidden:{},cleared:{},gone:{},locked:{}},err:'',reply:null,draft:''});
   if(route().page==='chat')C.init();
 };
+
+
+/* ================= SETUP CHECK (#/status) ================= */
+function pageStatus(){
+  return `<section class="sect" style="padding-top:26px"><p class="kicker">For the site owner</p><h1 style="font-size:clamp(1.9rem,4vw,2.7rem)">Setup check</h1>
+  <p class="lead">Shows which parts of Artmark are connected. It never shows any key.</p>
+  <div class="card pad"><div id="statuslist" class="stlist">Checking…</div><button class="btn sm" data-act="statusrun" style="margin-top:12px">Run the checks again</button></div></section>`;
+}
+async function runStatus(){
+  const el=$('#statuslist');if(!el)return;el.textContent='Checking…';
+  const rows=[],add=(st,label,hint)=>rows.push({st,label,hint:st==='ok'?'':(hint||'')});
+  const J=async u=>{try{const r=await fetch(u,{cache:'no-store'});const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(e){}return {ok:r.ok,status:r.status,j}}catch(e){return {ok:false,status:0,j:null}}};
+  add('ok','Website files loaded');
+  const cfg=await J('/api/config');
+  if(cfg.status===0||cfg.status===404)add('bad','Server files (api folder) are running','The api folder is not deployed. On GitHub the folder named api (with ai.js, config.js, health.js, pusher-auth.js inside) must be at the top level of the repository. Add it, then wait for Vercel to redeploy.');
+  else if(!cfg.ok)add('bad','Server settings page (/api/config)','It returned an error'+(cfg.j&&cfg.j.error?': '+cfg.j.error:'')+'. Fix the variable it names in Vercel, then Redeploy.');
+  else{
+    add('ok','Server files (api folder) are running');
+    const c=cfg.j||{};
+    add(/^https:\/\/[^\s]+\.[a-z]{2,}\/?$/i.test(c.SUPABASE_URL||'')?'ok':'bad','Supabase address (SUPABASE_URL)',(c.SUPABASE_URL||'')?'It must look like https://xxxx.supabase.co. Edit the variable in Vercel and Redeploy.':'Not set in Vercel. Add SUPABASE_URL and Redeploy.');
+    add(c.SUPABASE_ANON_KEY?'ok':'bad','Supabase public key (SUPABASE_ANON_KEY)',c.SUPABASE_ANON_KEY?'':'Not set in Vercel. Use the publishable / anon key, never the secret key.');
+    add(c.PUSHER_KEY?'ok':'warn','Pusher key (PUSHER_KEY)',c.PUSHER_KEY?'':'Not set. Online dots and typing will be off, but chat still works.');
+  }
+  add(window.SB?'ok':'bad','Supabase connected in this page',window.SB?'':'Press Ctrl+F5. If it is still red, the settings above show what is missing.');
+  let session=null;
+  if(window.SB){try{const g=await SB.auth.getSession();session=g.data.session}catch(e){}}
+  add(session?'ok':'warn','Logged in with a real account',session?'':'Not logged in. Sign up or log in, then run the check again.');
+  if(window.SB&&session){
+    try{const r=await SB.from('docs').select('path').limit(1);add(r.error?'bad':'ok','Database tables ready (docs)',r.error?'Run supabase.sql in Supabase > SQL Editor. Message: '+(r.error.message||r.error.code):'')}catch(e){add('bad','Database tables ready (docs)','Could not reach Supabase.')}
+    try{const r=await SB.from('profiles').select('id').limit(1);add(r.error?'bad':'ok','Profiles table ready',r.error?'Run supabase.sql again.':'')}catch(e){}
+  }
+  const h=await J('/api/health');
+  if(h.ok&&h.j){
+    add(h.j.supabase_configured?'ok':'bad','Server can see the Supabase variables',h.j.supabase_configured?'':'The server cannot see SUPABASE_URL / SUPABASE_ANON_KEY. Check names and the Production box in Vercel.');
+    add(h.j.pusher_configured?'ok':'warn','Server can see PUSHER_KEY and PUSHER_SECRET',h.j.pusher_configured?'':'Add PUSHER_SECRET (type Secret) in Vercel for online dots and typing.');
+    const prov=h.j.ai_provider;
+    add(h.j.ai_configured?(prov?'ok':'warn'):'bad','AI critic key on the server'+(prov?' ('+prov+')':''),h.j.ai_configured?'Old server files are live. Upload the 4 new api files so the AI can be identified.':(prov?'Add GEMINI_API_KEY or ANTHROPIC_API_KEY in Vercel and Redeploy.':'The server reports no AI key. The old server files only know ANTHROPIC_API_KEY, so a Gemini key is not seen. Upload the 4 new api files (they support Gemini), or add ANTHROPIC_API_KEY.'));
+  }else add('warn','Server health page (/api/health)','Could not open it.');
+  if(C.px&&C.px.client){const st=C.px.client.connection&&C.px.client.connection.state;add(st==='connected'?'ok':'warn','Pusher connection','State: '+(st||'unknown')+(st==='connected'?'':'. Check that the key and secret come from the same Pusher app and that Enable client events is on.'))}
+  add(C.status==='live'?'ok':(session?'bad':'warn'),'Live chat connected',C.status==='live'?'':(session?'Open the Chat page once. If it still fails, read the lines above for the first red item.':'Log in first.'));
+  const ico={ok:'✅',bad:'❌',warn:'⚠️'};
+  el.innerHTML=rows.map(r=>`<div class="strow"><span class="stic">${ico[r.st]}</span><div><b>${esc(r.label)}</b>${r.hint?`<div class="sthint">${esc(r.hint)}</div>`:''}</div></div>`).join('');
+}
 
 /* dashboard */
 function pageDashboard(){
@@ -1613,6 +1660,7 @@ const A={
   mschangesopen:d=>modal(`<h2>Ask for changes</h2><form data-form="mschanges" data-c="${d.c}" data-i="${d.i}"><label class="f">What should change?<textarea name="text" required maxlength="200"></textarea></label><button class="btn" style="width:100%">Send request</button></form>`),
   claim:d=>{if(!requireLogin())return;const m=me();if(m.points<+d.p)return;const code=d.b.replace(/[^A-Z]/g,'').slice(0,3)+'-'+Math.random().toString(36).slice(2,8).toUpperCase();m.claimed.push({brand:d.b,code});save();render();toast('Voucher claimed (sample code)')},
   sample:()=>{const m=me(),a=an(m.id),cs=['United States','France','Japan','Pakistan','Germany','Brazil'];for(let i=0;i<60;i++){const c=cs[Math.floor(Math.random()*cs.length*Math.random()*1.4)%cs.length];a.countries[c]=(a.countries[c]||0)+1;a.views++;a.impr+=3}save();render()},
+  statusrun:()=>runStatus(),
   pwtoggle:(d,el)=>{const i=el.parentElement.querySelector('input');if(i)i.type=i.type==='password'?'text':'password'},
   chpwopen:()=>{const m=me();if(!m)return;modal(`<h2>Change password</h2><form data-form="chpw" autocomplete="on"><input type="email" name="u" value="${esc(m.email)}" autocomplete="username" hidden>${window.SB?'':eyeField('Current password','cur','current-password')}${eyeField('New password','pw','new-password')}${eyeField('Repeat new password','pw2','new-password')}<p class="err" id="autherr"></p><button class="btn" style="width:100%">Save new password</button></form>`)},
   resend:async d=>{const {error}=await SB.auth.resend({type:'signup',email:d.email});toast(error?error.message:'Confirmation email sent')},
