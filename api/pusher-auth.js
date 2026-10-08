@@ -8,8 +8,18 @@ async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const PUSHER_KEY = pick('PUSHER_KEY', 'VITE_PUSHER_KEY', 'NEXT_PUBLIC_PUSHER_KEY'), PUSHER_SECRET = pick('PUSHER_SECRET', 'PUSHER_APP_SECRET');
   const SUPABASE_URL = pick('SUPABASE_URL', 'VITE_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'), SUPABASE_ANON_KEY = pick('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  if (!PUSHER_KEY || !PUSHER_SECRET || !SUPABASE_URL || !SUPABASE_ANON_KEY) return res.status(500).json({ error: 'Server is not configured' });
-
+ if (!PUSHER_KEY || !PUSHER_SECRET || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    const missing = [];
+    if (!PUSHER_KEY) missing.push('PUSHER_KEY');
+    if (!PUSHER_SECRET) missing.push('PUSHER_SECRET');
+    if (!SUPABASE_URL) missing.push('SUPABASE_URL');
+    if (!SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
+    
+    return res.status(500).json({ 
+      error: 'Server configuration missing', 
+      missing_keys: missing 
+    });
+  }
   // 1) Who is asking? Only logged-in users get access.
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ error: 'Log in first' });
