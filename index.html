@@ -447,7 +447,7 @@ window.artmarkBanner=function(msg){
     return {
       id:path.split('/').pop(),path:path,
       get:async function(){var r=await SB.from('docs').select('path,data').eq('path',path).maybeSingle();if(r.error)throw fail(r.error);return snapDoc(path,r.data)},
-      set:async function(d){var r=await SB.from('docs').upsert({path:path,parent:parentOf(path),data:clone(d),ts:Number(d.t||d.created||Date.now())});if(r.error)throw fail(r.error)},
+      set:async function(d){var owner=session&&session.user&&session.user.id;if(!owner)throw fail({code:'not_signed_in',message:'Log in first'});var r=await SB.from('docs').upsert({path:path,parent:parentOf(path),data:clone(d),ts:Number(d.t||d.created||Date.now()),owner:owner});if(r.error)throw fail(r.error)},
       update:async function(d){var r=await SB.rpc('merge_doc',{p_path:path,p_patch:clone(d)});if(r.error)throw fail(r.error)},
       delete:async function(){var r=await SB.from('docs').delete().eq('path',path);if(r.error)throw fail(r.error)},
       collection:function(p){return colRef(path+'/'+p)},
