@@ -10,7 +10,6 @@ const pick = (...names) => {
 const hits = new Map();
 
 module.exports = async (req, res) => {
-  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -26,7 +25,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'Server environment variables missing', code: 'server_config' });
   }
 
-  // 1) Authentication Check via Supabase
+  // Auth Verification
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ error: 'Log in first', code: 'not_signed_in' });
 
@@ -38,13 +37,13 @@ module.exports = async (req, res) => {
     if (!who.ok) return res.status(401).json({ error: 'Session expired', code: 'not_signed_in' });
     const user = await who.json();
 
-    // 2) Rate limit: 20 requests per user per hour
+    // Rate Limiting
     const now = Date.now();
     const list = (hits.get(user.id) || []).filter(t => now - t < 3600e3);
     if (list.length >= 20) return res.status(429).json({ error: 'Too many requests', code: 'rate_limited' });
     list.push(now); hits.set(user.id, list);
 
-    // 3) Validate Payload
+    // Payload Parsing
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const turns = Array.isArray(body.turns) ? body.turns.slice(-12) : [];
     if (!turns.length || turns[turns.length - 1].role !== 'user') {
@@ -65,7 +64,7 @@ module.exports = async (req, res) => {
       }
     }
 
-    // 4) Call Gemini API
+    // Direct Gemini 1.5 Flash Call
     const model = pick('GEMINI_MODEL') || 'gemini-1.5-flash';
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${GEMINI_API_KEY.trim()}`;
 
@@ -76,7 +75,9 @@ module.exports = async (req, res) => {
     });
 
     const j = await r.json();
-    if (!r.ok) return res.status(502).json({ error: j.error?.message || 'Gemini API Error', code: 'ai_error' });
+    if (!r.ok) {
+      return res.status(502).json({ error: j.error?.message || 'Gemini API Error', code: 'ai_error' });
+    }
 
     const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map(p => p.text || '').join('\n');
     if (!text) return res.status(502).json({ error: 'The AI did not return an answer', code: 'ai_blocked' });
