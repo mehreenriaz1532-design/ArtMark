@@ -65,7 +65,7 @@ module.exports = async (req, res) => {
     }
 
     // Direct Gemini 1.5 Flash Call
-    const model = pick('GEMINI_MODEL') || 'gemini-1.5-flash';
+   const model = pick('GEMINI_MODEL') || 'gemini-2.0-flash';
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${GEMINI_API_KEY.trim()}`;
 
     const r = await fetch(endpoint, {
