@@ -77,8 +77,9 @@ module.exports = async (req, res) => {
     }
 
     // 4) Active Gemini Model Endpoint
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY.trim()}`;
-
+   // 4) Active Gemini Model Endpoint
+    const model = 'gemini-1.5-flash';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY.trim()}`;
     const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
