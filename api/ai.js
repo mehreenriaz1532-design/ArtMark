@@ -84,7 +84,8 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1000 } })
-    });
+    }); 
+    -
     const j = await r.json();
 
     if (!r.ok) {
