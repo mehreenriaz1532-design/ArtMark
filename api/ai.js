@@ -1,10 +1,10 @@
-// Vercel serverless function: AI art critic
-const pick = (...names) => { 
-  for (const n of names) { 
-    const v = process.env[n]; 
-    if (v) return v; 
-  } 
-  return ''; 
+// Vercel serverless function: AI art critic - FIXED
+const pick = (...names) => {
+  for (const n of names) {
+    const v = process.env[n];
+    if (v) return v;
+  }
+  return '';
 };
 
 const hits = new Map();
@@ -16,35 +16,29 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST method only' });
+  if (req.method!== 'POST') return res.status(405).json({ error: 'POST method only' });
 
   try {
     const GEMINI_API_KEY = pick('GEMINI_API_KEY', 'VITE_GEMINI_API_KEY', 'NEXT_PUBLIC_GEMINI_API_KEY');
     const SUPABASE_URL = pick('SUPABASE_URL', 'VITE_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL');
     const SUPABASE_ANON_KEY = pick('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
 
-    // Environment guard
-    if (!GEMINI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    if (!GEMINI_API_KEY ||!SUPABASE_URL ||!SUPABASE_ANON_KEY) {
       const missing = [];
       if (!GEMINI_API_KEY) missing.push('GEMINI_API_KEY');
       if (!SUPABASE_URL) missing.push('SUPABASE_URL');
       if (!SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
-      
-      return res.status(500).json({ 
-        error: 'Server environment variables missing', 
-        code: 'server_config',
-        missing_keys: missing 
-      });
+      return res.status(500).json({ error: 'Server env missing', code: 'server_config', missing_keys: missing });
     }
 
-    // 1) Auth Check via Supabase
+    // 1) Auth Check
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!token) return res.status(401).json({ error: 'Log in first', code: 'not_signed_in' });
 
     const who = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY }
     });
-    
+
     if (!who.ok) return res.status(401).json({ error: 'Session expired', code: 'not_signed_in' });
     const user = await who.json();
 
@@ -62,8 +56,8 @@ module.exports = async (req, res) => {
       body = req.body || {};
     }
 
-    const turns = Array.isArray(body.turns) ? body.turns.slice(-12) : [];
-    const promptText = body.prompt || (turns.length ? turns[turns.length - 1].content : 'Please review my artwork.');
+    const turns = Array.isArray(body.turns)? body.turns.slice(-12) : [];
+    const promptText = body.prompt || (turns.length? turns[turns.length - 1].content : 'Please review my artwork.');
 
     const contents = [{ role: 'user', parts: [{ text: String(promptText).slice(0, 8000) }] }];
 
@@ -76,27 +70,49 @@ module.exports = async (req, res) => {
       }
     }
 
-    // 4) Active Gemini Model Endpoint
-// 4) Active Gemini Model Endpoint
-    const model = 'gemini-3.8-flash'; // Yahan gemini-3.8-flash karein
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY.trim()}`;
-    const r = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1000 } })
-    }); 
-    -
-    const j = await r.json();
+    // 4) FIXED MODEL LIST - ye wale models 100% working hain
+    const modelsToTry = [
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-latest'
+    ];
 
-    if (!r.ok) {
-      console.error('Gemini Error:', j);
-      return res.status(502).json({ error: j.error?.message || 'Gemini API Error', code: 'ai_error' });
+    let finalText = '';
+    let lastError = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY.trim()}`;
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 1000 } })
+        });
+
+        const j = await r.json();
+
+        if (!r.ok) {
+          lastError = j.error?.message || 'API Error';
+          console.error(`Model ${model} failed:`, lastError);
+          continue; // next model try karo
+        }
+
+        const text = j.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n');
+        if (text) {
+          finalText = text;
+          break; // success
+        }
+      } catch (err) {
+        lastError = err.message;
+        continue;
+      }
     }
 
-    const text = j.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n');
-    if (!text) return res.status(502).json({ error: 'No answer generated', code: 'ai_blocked' });
+    if (!finalText) {
+      return res.status(502).json({ error: lastError || 'No answer generated', code: 'ai_blocked' });
+    }
 
-    return res.status(200).json({ text, reply: text, result: text });
+    return res.status(200).json({ text: finalText, reply: finalText, result: finalText });
 
   } catch (e) {
     console.error('AI Catch Error:', e);
