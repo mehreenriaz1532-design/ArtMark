@@ -1,4 +1,4 @@
-// Vercel serverless function: AI art critic - GROQ VERSION
+// Vercel serverless function: AI art critic - GROQ FIXED VERSION
 const pick = (...names) => {
   for (const n of names) { if (process.env[n]) return process.env[n]; }
   return '';
@@ -13,7 +13,6 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST method only' });
 
   try {
-    // Groq key check (agar GEMINI_API_KEY mein bhi save ki ho toh wo bhi utha lega)
     const GROQ_API_KEY = pick('GROQ_API_KEY', 'GEMINI_API_KEY', 'VITE_GROQ_API_KEY', 'NEXT_PUBLIC_GROQ_API_KEY');
     const SUPABASE_URL = pick('SUPABASE_URL', 'VITE_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL');
     const SUPABASE_ANON_KEY = pick('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
@@ -42,11 +41,16 @@ module.exports = async (req, res) => {
     } else { body = req.body || {}; }
 
     const userPrompt = body.prompt || 'Please review my artwork.';
-    const cleanPrompt = `You are a friendly art critic. Review this artwork based on the user's description. Be positive and give 4 points: Composition, Light, Colors, and 1 tip to improve. Keep it short, under 150 words. User description says: ${String(userPrompt).slice(0, 1000)}`;
+    const cleanPrompt = `You are a friendly art critic. Review this artwork nicely. Be positive and provide feedback on 4 points: Composition, Light, Colors, and 1 Tip to improve. Keep it short and under 150 words. User note: ${String(userPrompt).slice(0, 1000)}`;
 
-    // Groq API Endpoint & Models list (using fast & reliable Llama models)
     const endpoint = "https://api.groq.com/openai/v1/chat/completions";
-    const modelsToTry = ['llama-3.1-8b-instant', 'llama3-8b-8192', 'llama-3.3-70b-versatile'];
+    
+    // Only real text generation models (Prompt Guard / Moderation models excluded)
+    const modelsToTry = [
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+      'mixtral-8x7b-32768'
+    ];
 
     let finalText = '';
 
@@ -64,7 +68,7 @@ module.exports = async (req, res) => {
               { role: "user", content: cleanPrompt }
             ],
             max_tokens: 300,
-            temperature: 0.8
+            temperature: 0.7
           })
         });
 
@@ -74,7 +78,8 @@ module.exports = async (req, res) => {
         let text = j.choices?.[0]?.message?.content || '';
         text = text.replace(/[^\x20-\x7E\n\r.,!?:;()'"-]/g, '').trim();
         
-        if (text.length > 20) {
+        // Ensure reply is actual sentences, not raw numbers/garbled output
+        if (text.length > 30 && !/^\d+(\.\d+)?$/.test(text)) {
           finalText = text;
           break;
         }
