@@ -1,4 +1,4 @@
-// Vercel serverless function: AI art critic - CORRECT JSON STRING VERSION
+// Vercel serverless function: AI art critic - FIXED DIRECT OBJECT VERSION
 const pick = (...names) => {
   for (const n of names) { if (process.env[n]) return process.env[n]; }
   return '';
@@ -14,7 +14,7 @@ module.exports = async (req, res) => {
   try {
     const GROQ_API_KEY = pick('GROQ_API_KEY', 'GEMINI_API_KEY', 'VITE_GROQ_API_KEY', 'NEXT_PUBLIC_GROQ_API_KEY');
 
-    // Default structured JSON object expected by frontend AI.normalize
+    // Default structured JSON object matching frontend AI.normalize schema
     const artReviewObj = {
       isArtwork: true,
       medium: "Digital or Mixed media",
@@ -69,9 +69,9 @@ module.exports = async (req, res) => {
       Write a short, friendly, positive critique mentioning composition, light, and colors.`;
 
       const endpoint = "https://api.groq.com/openai/v1/chat/completions";
-      const modelsToTry = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
+      const modelsToTrust = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
 
-      for (const model of modelsToTry) {
+      for (const model of modelsToTrust) {
         try {
           const r = await fetch(endpoint, {
             method: 'POST',
@@ -102,14 +102,17 @@ module.exports = async (req, res) => {
       }
     }
 
-    // If we got text from Groq, put it inside the verdict of our structured JSON object
     if (generatedText) {
       artReviewObj.verdict = generatedText;
       artReviewObj.strengths = [generatedText.slice(0, 100)];
     }
 
-    // CRITICAL: Frontend expects `text` field to contain a stringified JSON matching its schema
-    return res.status(200).json({ text: JSON.stringify(artReviewObj) });
+    // CRITICAL FIX: Return both `text` (stringified) AND direct JSON compatibility keys
+    return res.status(200).json({ 
+      text: JSON.stringify(artReviewObj),
+      json: artReviewObj,
+      success: true 
+    });
 
   } catch (e) {
     console.error(e);
@@ -126,6 +129,6 @@ module.exports = async (req, res) => {
       tags: ["art"],
       notes: "Estimate only"
     };
-    return res.status(200).json({ text: JSON.stringify(fallbackObj) });
+    return res.status(200).json({ text: JSON.stringify(fallbackObj), json: fallbackObj });
   }
 };
