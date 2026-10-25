@@ -13,6 +13,75 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Nunito:wght@400;500;600;700;800&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
 <style>
+  /* SPA Page View Toggle */
+.spa-page {
+  width: 100%;
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 20px 15px;
+}
+
+/* Profile Layout */
+.profile-header {
+  display: flex;
+  gap: 40px;
+  align-items: center;
+  padding-bottom: 30px;
+  border-bottom: 1px solid #dbdbdb;
+}
+
+.avatar-box img {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #e0e0e0;
+}
+
+.profile-title-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.profile-stats {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 15px;
+  font-size: 16px;
+}
+
+.posts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.posts-grid img {
+  width: 100%;
+  height: 250px;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.posts-grid img:hover {
+  transform: scale(1.02);
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+  .profile-header {
+    flex-direction: column;
+    text-align: center;
+  }
+  .posts-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 :root{
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
@@ -419,6 +488,51 @@ nav.main a::after{bottom:0}
   <div class="who" id="who"></div>
 </div></header>
 <main class="wrap" id="app"></main>
+  <!-- ================= PROFILE SECTION ================= -->
+<section id="profile-page" class="spa-page" style="display: none;">
+  <div class="profile-container">
+    
+    <!-- Profile Header Top Info -->
+    <div class="profile-header">
+      <div class="avatar-box">
+        <img id="p-avatar" src="https://via.placeholder.com/150" alt="Profile Picture">
+      </div>
+
+      <div class="profile-info">
+        <div class="profile-title-row">
+          <h2 id="p-username">@artist_name</h2>
+          
+          <!-- Dynamic Action Buttons -->
+          <div id="profile-actions-btn">
+            <!-- Buttons JavaScript se dynamically change hongay -->
+          </div>
+        </div>
+
+        <!-- Instagram Style Stats Counter -->
+        <div class="profile-stats">
+          <div class="stat-item"><b id="p-posts-count">0</b> <span>posts</span></div>
+          <div class="stat-item"><b id="p-followers-count">0</b> <span>followers</span></div>
+          <div class="stat-item"><b id="p-following-count">0</b> <span>following</span></div>
+        </div>
+
+        <div class="profile-bio-box">
+          <h4 id="p-fullname">Full Name</h4>
+          <p id="p-bio">Artist Bio will appear here...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gallery / Posts Grid -->
+    <div class="profile-tab-header">
+      <button class="active">POSTS</button>
+    </div>
+    
+    <div id="p-posts-grid" class="posts-grid">
+      <!-- User posts dynamically dynamic load hongay -->
+    </div>
+
+  </div>
+</section>
 <footer class="wrap">Demo build: accounts, art and chats are saved inside this browser only. To make Artmark truly global (every artist sees every upload and chats between different devices), connect a shared backend such as Supabase or Firebase. · <a href="#/status">Setup check</a></footer>
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>
@@ -2159,6 +2273,46 @@ load();
 if(!remembered()&&!window.SB){db.session=null;try{localStorage.removeItem('artmark_norem')}catch(e){}save()}
 render();
 if(window.SB)SBA.init();
+  // Function to show profile page (Matched with your HTML IDs)
+async function openUserProfile(userId) {
+  // 1. Hide all other main sections / app view, show profile page
+  const mainApp = document.getElementById('app');
+  if (mainApp) mainApp.style.display = 'none';
+  
+  const profilePage = document.getElementById('profile-page');
+  if (profilePage) profilePage.style.display = 'block';
+
+  // 2. Fetch User Data from Supabase
+  try {
+    const { data: user, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('Error fetching user:', error.message);
+      return;
+    }
+
+    if (user) {
+      // 3. Populate HTML with actual data
+      document.getElementById('p-username').innerText = '@' + (user.username || 'user');
+      document.getElementById('p-fullname').innerText = user.full_name || user.username || 'Artist';
+      document.getElementById('p-bio').innerText = user.bio || 'No bio yet...';
+      document.getElementById('p-avatar').src = user.avatar_url || 'https://via.placeholder.com/150';
+      
+      document.getElementById('p-posts-count').innerText = user.posts_count || 0;
+      document.getElementById('p-followers-count').innerText = user.followers_count || 0;
+      document.getElementById('p-following-count').innerText = user.following_count || 0;
+
+      // 4. Optional: Update Message Button State based on Request Status
+      // updateMessageButtonState(currentUserId, userId);
+    }
+  } catch (err) {
+    console.error('Failed to load profile:', err);
+  }
+}
 </script>
 </body>
 </html>
