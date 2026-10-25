@@ -83,3 +83,37 @@ Open `https://YOUR-SITE/api/health`. You should see `true` for all three items (
 - No live updates: Supabase → Database → Replication → enable Realtime for the `docs` table.
 - No online dots or typing: check "Enable client events" in Pusher and that `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER` are set.
 - AI says "Server is not configured": add the variables and redeploy.
+
+## Variable names that also work
+The server files accept these alternative names, so you do not need to rename anything: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PUSHER_KEY`, `VITE_PUSHER_CLUSTER` (also `NEXT_PUBLIC_…` versions). For the AI critic you can set either `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` (Anthropic is used first if both exist; optional `GEMINI_MODEL`, default `gemini-2.5-flash`). The Pusher secret must be named `PUSHER_SECRET`.
+
+## What's new: shared gallery, ratings, follow requests, orders, reports
+
+This update moves artwork, ratings, follow requests, marketplace listings and commission orders into the shared database, so they are the same for every visitor and every device — not just saved in one browser. It needs the database update below.
+
+### 1. Update the database
+Open Supabase → SQL Editor → paste the **whole, updated** `supabase.sql` (it's safe to re-run the earlier parts too) → Run.
+
+### 2. Make yourself an admin (optional, for the Reports page)
+Reports people send about artwork, listings, other artists, or a chat message are private — only the person who sent the report and admins can see them. To see them:
+1. In Supabase, go to Table Editor → `auth.users`, find your account, and copy its `id` (a long id like `3f29ab1c-...`).
+2. SQL Editor → new query → run:
+   ```sql
+   insert into app_admins (user_id) values ('paste-your-id-here');
+   ```
+3. Log out and back in to Artmark (admin status, like any permission change, applies the next time you connect, not instantly). A "Reports" tab appears in your menu, visible only to you.
+
+### 3. What changed for people using the site
+- **Feed**: search, category filters, and sorting now work across everyone's real uploads, not just your own browser's.
+- **Ratings**: one mark per artist per artwork — rating again changes your mark instead of adding a second one, on every device.
+- **Profiles**: bio, followers/following counts, and small achievement badges (first upload, 10+ marks received, battle wins, rank tier).
+- **Community page** (new, in the menu): every real signed-up artist, so your friends actually show up somewhere.
+- **Follow requests**: like a private account — send a request, the other person accepts it, and only then can you message each other. Messaging a seller about a marketplace listing is NOT blocked by this (so buyers can always ask questions).
+- **Marketplace & orders**: listings and commission orders are now visible to both sides from any device, including milestone approvals.
+- **Reports**: a 🚩 button on artwork, listings, profiles and chat messages. Reports are private (see admin setup above). This is the safe alternative to a developer being able to read everyone's private chats — which this build deliberately does not do, because that would break the end-to-end encryption and create a serious privacy and legal risk for your users.
+
+### Known limitations (so you're not surprised)
+- Rank points for being rated/uploading are still only tracked on your own device, not shared yet.
+- Payments are still simulated — see the payments section above for connecting a real processor.
+- Posting an "update" photo to an existing artwork is saved on your own device only for now (ratings, comments, and the artwork itself ARE shared).
+- If someone signed up before this update, their account still works, but a few profile-linking details only apply cleanly to accounts created from now on. If anything about a specific old test account looks odd, the simplest fix is to sign out and sign up again.

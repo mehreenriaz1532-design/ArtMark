@@ -390,6 +390,26 @@ nav.main a::after{bottom:0}
 }
 @media (max-width:380px){.aigrid{grid-template-columns:1fr}}
 .stlist .strow{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.stlist .strow:last-child{border:0}.stic{font-size:1.2rem;flex:none}.sthint{font-size:.88rem;color:var(--mute);margin-top:2px}
+
+/* ===== v6: mobile keyboard/composer, follow + reports UI ===== */
+@supports (height:100dvh){
+  .chat{height:min(640px,calc(100dvh - 220px))}
+  @media (max-width:900px){#msgs{height:52dvh}}
+  @media (max-width:600px){.chat .pane{height:78dvh}}
+}
+.composer{padding:12px}
+.composer input{padding:13px 16px;font-size:16px;min-height:46px}
+.ib{min-width:44px;min-height:44px;font-size:1.4rem}
+.composer form{align-items:center}
+@media (max-width:600px){
+  .composer{padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  .composer input{font-size:16px}
+  .airow input[name=text]{font-size:16px;padding:12px 16px;min-height:46px}
+  .f input,.f select,.f textarea{font-size:16px}
+  #msgs{scroll-padding-bottom:12px}
+}
+.kb-open .composer{position:sticky;bottom:0}
+
 </style>
 </head>
 <body class="cat-all">
@@ -399,7 +419,7 @@ nav.main a::after{bottom:0}
   <div class="who" id="who"></div>
 </div></header>
 <main class="wrap" id="app"></main>
-<footer class="wrap">Artmark · rate, rank, chat and sell art. Chats are end-to-end encrypted. Artworks and listings shown in the gallery are stored in your own browser until a shared database is added for them. · <a href="#/status">Setup check</a></footer>
+<footer class="wrap">Demo build: accounts, art and chats are saved inside this browser only. To make Artmark truly global (every artist sees every upload and chats between different devices), connect a shared backend such as Supabase or Firebase. · <a href="#/status">Setup check</a></footer>
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>
 
@@ -605,11 +625,13 @@ const me=()=>db.users.find(u=>u.id===db.session)||null;
 const getU=id=>db.users.find(u=>u.id===id)||{name:'Deleted artist',country:'',points:0,favs:[],following:[]};
 const getW=id=>db.works.find(w=>w.id===id);
 const getL=id=>db.listings.find(l=>l.id===id);
-const avg=w=>w.ratings.length?w.ratings.reduce((a,r)=>a+r.s,0)/w.ratings.length:0;
+const avg=w=>{if(w.shared){const c=S.ratingCache[w.id];if(c&&!c.loading)return c.avg;if(C.status==='live')S.loadRatings(w.id);return 0}return w.ratings.length?w.ratings.reduce((a,r)=>a+r.s,0)/w.ratings.length:0};
+const ratingsCount=w=>w.shared?((S.ratingCache[w.id]||{}).count||0):w.ratings.length;
+const commentsCount=w=>w.shared?(S.commentCache[w.id]?S.commentCache[w.id].length:0):w.comments.length;
 const an=id=>db.an[id]||(db.an[id]={views:0,impr:0,countries:{}});
 const starsTxt=v=>{const f=Math.round(v);return '★'.repeat(f)+'☆'.repeat(5-f)};
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
-function addPoints(id,n,why){const u=db.users.find(x=>x.id===id);if(!u)return;const before=tier(u.points);u.points+=n;if(id===db.session){toast(`+${n} rank points · ${why}`);if(tier(u.points)!==before){confetti();setTimeout(()=>toast(`Rank up! You are now ${tier(u.points)}`),1800)}}}
+function addPoints(id,n,why){const u=db.users.find(x=>x.id===id);if(!u)return;const before=tier(u.points);u.points+=n;if(id===db.session){if(C.status==='live')S.pushProfile();toast(`+${n} rank points · ${why}`);if(tier(u.points)!==before){confetti();setTimeout(()=>toast(`Rank up! You are now ${tier(u.points)}`),1800)}}}
 function confetti(){const box=document.createElement('div');box.className='confetti';for(let i=0;i<24;i++){const e=document.createElement('i');e.style.setProperty('--x',Math.random()*100+'vw');e.style.setProperty('--d',Math.random()*.7+'s');e.style.setProperty('--h',Math.floor(Math.random()*360));e.style.setProperty('--r',(Math.random()*720-360)+'deg');box.appendChild(e)}document.body.appendChild(box);setTimeout(()=>box.remove(),2600)}
 function bump(kind){
   const u=me();if(!u)return;const day=new Date().toDateString();
@@ -634,7 +656,7 @@ function videoInfo(file){return new Promise((res,rej)=>{
 /* ---------- modal ---------- */
 function modal(html,wide){const m=$('#modal');m.innerHTML=`<div class="mbox ${wide?'wide':''}" role="dialog" aria-modal="true"><button class="x" data-act="close" aria-label="Close">×</button>${html}</div>`;m.hidden=false;document.body.style.overflow='hidden'}
 function closeModal(){
-  const m=$('#modal');m.hidden=true;m.innerHTML='';document.body.style.overflow='';
+  const m=$('#modal');m.hidden=true;m.innerHTML='';document.body.style.overflow='';S.closeWork();
   const p=route().page;if(p==='work'||p==='listing'){const h=p==='work'?'#/feed':'#/market';try{history.replaceState(null,'',h)}catch(e){location.hash=h}}
 }
 function confirmModal(title,msg,act,data){
@@ -679,18 +701,19 @@ function afterLogin(u,remember,kind){
 }
 
 /* ---------- rendering ---------- */
-const ROUTES=[['feed','Feed','🖼'],['ai','AI Critic','✨'],['challenges','Weekly','🏆'],['market','Market','🛍'],['supplies','Supplies','🎨'],['commissions','Orders','📜'],['chat','Chat','💬'],['dashboard','Stats','📊']];
+const ROUTES=[['feed','Feed','🖼'],['people','People','👥'],['ai','AI Critic','✨'],['challenges','Weekly','🏆'],['market','Market','🛍'],['supplies','Supplies','🎨'],['commissions','Orders','📜'],['chat','Chat','💬'],['dashboard','Stats','📊']];
 function route(){const p=(location.hash||'#/feed').replace('#/','').split('/');return {page:p[0]||'feed',arg:p[1]}}
 function unreadCount(){return C.unreadN()}
 function render(){
   const r=route(),m=me();
   let page=r.page==='work'?'feed':r.page==='listing'?'market':(r.page==='join'||r.page==='dm')?'chat':r.page;
   if(r.page==='join'||r.page==='dm')C.pending={k:r.page,v:decodeURIComponent(r.arg||'')};
-  const pages={feed:pageFeed,challenges:pageChallenges,market:pageMarket,supplies:pageSupplies,commissions:pageCommissions,chat:pageChat,dashboard:pageDashboard,artist:pageArtist,ai:pageAI,status:pageStatus};
+  const pages={feed:pageFeed,people:pagePeople,challenges:pageChallenges,market:pageMarket,supplies:pageSupplies,commissions:pageCommissions,chat:pageChat,dashboard:pageDashboard,artist:pageArtist,ai:pageAI,status:pageStatus,reports:pageReports};
   document.body.className='cat-'+((page==='feed'||page==='challenges')?cat:'all');
   $('#app').innerHTML=(pages[page]||pageFeed)(r.arg);
-  const un=unreadCount();
-  $('#nav').innerHTML=ROUTES.map(x=>`<a href="#/${x[0]}" class="${page===x[0]?'on':''}"><span class="ic" aria-hidden="true">${x[2]}</span>${x[1]}${x[0]==='chat'&&un?`<span class="bdg">${un}</span>`:''}</a>`).join('');
+  const un=unreadCount(),rn=(S.reports||[]).filter(x=>x.status==='open').length;
+  $('#nav').innerHTML=ROUTES.map(x=>`<a href="#/${x[0]}" class="${page===x[0]?'on':''}"><span class="ic" aria-hidden="true">${x[2]}</span>${x[1]}${x[0]==='chat'&&un?`<span class="bdg">${un}</span>`:''}</a>`).join('')
+    +(S.admin?`<a href="#/reports" class="${page==='reports'?'on':''}"><span class="ic" aria-hidden="true">🚩</span>Reports${rn?`<span class="bdg">${rn}</span>`:''}</a>`:'');
   const dark=document.documentElement.dataset.theme==='dark'||(!document.documentElement.dataset.theme&&matchMedia('(prefers-color-scheme: dark)').matches);
   $('#who').innerHTML=`<button class="iconbtn" data-act="theme" aria-label="Switch light or dark theme" title="Light / dark">${dark?'☀️':'🌙'}</button>`+(m?`<span class="chip">#${rankPos(m.id)} · ${tier(m.points)} · ${m.points} pts</span><button class="iconbtn" data-act="profile" style="border:0;padding:0" aria-label="Edit my profile">${avatar(m,36)}</button><button class="btn ghost sm" data-act="logout">Log out</button>`
     :`<button class="btn ghost sm" data-act="authopen" data-t="login">Log in</button><button class="btn sm" data-act="authopen" data-t="signup">Sign up</button>`);
@@ -703,7 +726,7 @@ function render(){
   if($('#modal').hidden){if(r.page==='work'&&getW(r.arg))workModal(r.arg);if(r.page==='listing'&&getL(r.arg))listingModal(r.arg)}
 }
 window.addEventListener('hashchange',()=>{if(!$('#modal').hidden)closeModalQuiet();render();scrollTo(0,0)});
-function closeModalQuiet(){const m=$('#modal');m.hidden=true;m.innerHTML='';document.body.style.overflow=''}
+function closeModalQuiet(){const m=$('#modal');m.hidden=true;m.innerHTML='';document.body.style.overflow='';S.closeWork()}
 
 const catBar=()=>`<div class="cats" role="tablist" aria-label="Art category">${[['all','All art'],...Object.entries(CATS)].map(([k,v])=>`<button data-act="cat" data-c="${k}" class="${cat===k?'on':''}">${v}</button>`).join('')}</div>`;
 const tierBadge=u=>`<span class="tag">${tier(u.points)}</span>`;
@@ -712,15 +735,16 @@ function media(w){
   return `<img src="${w.img}" alt="${esc(w.title)}" loading="lazy">${v?`<video data-auto src="${v}" muted loop playsinline preload="metadata"></video>`:''}${w.hasVid?'<span class="badge">▶ Process video</span>':''}`;
 }
 function workCard(w){
-  const u=getU(w.uid),a=avg(w),m=me(),fav=m&&m.favs.includes(w.id);
+  const u=getU(w.uid),a=avg(w),cnt=ratingsCount(w),m=me(),fav=m&&m.favs.includes(w.id);
   return `<article class="card art"><button class="thumb" data-act="open" data-id="${w.id}" aria-label="Open ${esc(w.title)}">${media(w)}</button>
   <button class="fav ${fav?'on':''}" data-act="fav" data-id="${w.id}" aria-label="Save to favourites" aria-pressed="${!!fav}">♥</button>
   <div class="meta"><h3 style="margin-bottom:.25em">${esc(w.title)}</h3>
   <div class="row small"><span style="display:flex;gap:7px;align-items:center">${avatar(u,22)}${ulink(u)}</span><span class="tag">${CATS[w.cat]}</span></div>
   ${w.ai?`<div style="margin-top:6px"><span class="tag ai">✨ AI mark ${w.ai.overall}/10</span></div>`:''}
-  <div class="row small" style="margin-top:8px"><span class="stars" title="${a.toFixed(1)} of 5">${a?starsTxt(a):'Not rated yet'}</span><span class="muted">${w.ratings.length} marks · ${w.comments.length} notes</span></div>
+  <div class="row small" style="margin-top:8px"><span class="stars" title="${a.toFixed(1)} of 5">${a?starsTxt(a):'Not rated yet'}</span><span class="muted">${cnt} mark${cnt===1?'':'s'} · ${commentsCount(w)} notes</span></div>
   <div class="row" style="margin-top:8px"><button class="btn ghost sm" data-act="share" data-k="work" data-id="${w.id}">↗ Share</button><span class="datemeta" title="${esc(fmtDateTime(w.created))}">🕒 ${fmtDate(w.created)}</span></div></div></article>`;
 }
+
 function tasksCard(){
   const m=me();
   if(!m)return `<div class="card pad"><h3>Daily tasks raise your rank</h3><p class="muted small">Log in to see today's tasks. Each finished task adds rank points.</p><button class="btn sm" data-act="authopen" data-t="signup">Create free account</button></div>`;
@@ -769,36 +793,55 @@ function pageFeed(){
 }
 
 /* artist profile */
+const byChatId=cid=>db.users.find(x=>x.chatId===cid)||{id:cid,name:'An artist'};
 function pageArtist(id){
   const u=db.users.find(x=>x.id===id),m=me();
   if(!u)return `<section class="sect empty"><h2>Artist not found</h2><a class="btn" href="#/feed">Back to feed</a></section>`;
-  const ws=db.works.filter(w=>w.uid===u.id).sort((a,b)=>b.created-a.created),followers=db.users.filter(x=>x.following.includes(u.id)).length,own=m&&m.id===u.id,fol=m&&m.following.includes(u.id);
-  const all=ws.flatMap(w=>w.ratings),av=all.length?all.reduce((s,r)=>s+r.s,0)/all.length:0;
+  const ws=db.works.filter(w=>w.uid===u.id||w.uid===(u.chatId||u.id)).sort((a,b)=>b.created-a.created),own=m&&m.id===u.id;
+  const all=ws.flatMap(w=>w.shared?[]:w.ratings),avLocal=all.length?all.reduce((s,r)=>s+r.s,0)/all.length:0;
+  const liveMode=C.status==='live',uc=u.chatId||u.id;
+  const fs=liveMode?S.followStats(uc):{followers:db.users.filter(x=>(x.following||[]).includes(u.id)).length,following:(u.following||[]).length,loaded:true};
+  const mySt=liveMode&&!own?S.myStatusWith(uc):null;
+  const pendingIn=own&&liveMode?S.reqIn.filter(r=>r.status==='pending'):[];
+  const ach=achievements(u,ws);
+  let followBtn='';
+  if(!own){
+    if(!liveMode)followBtn=`<button class="btn" data-act="follow" data-u="${u.id}">${m&&(m.following||[]).includes(u.id)?'Following ✓':'Follow'}</button>`;
+    else if(mySt==='accepted')followBtn=`<button class="btn ghost" data-act="unfollowreq" data-id="${S.reqOut.find(r=>r.target===uc).id}">Following ✓ · Unfollow</button>`;
+    else if(mySt==='pending')followBtn=`<button class="btn ghost" disabled>Request sent</button>`;
+    else followBtn=`<button class="btn" data-act="followreq" data-u="${uc}">+ Follow</button>`;
+  }
   return `<section class="sect" style="padding-top:26px"><div class="card pad" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">${avatar(u,84)}
   <div style="flex:1;min-width:220px"><h1 style="font-size:clamp(1.7rem,4vw,2.4rem);margin-bottom:.15em">${esc(u.name)}</h1>
   <p class="muted" style="margin-bottom:.4em">${esc(u.country)} · ${tier(u.points)} · rank #${rankPos(u.id)} · ${u.points} points</p>${u.bio?`<p>${esc(u.bio)}</p>`:''}
-  <p class="small muted">${ws.length} artworks · ${followers} followers · ${av?av.toFixed(1)+' average mark':'no marks yet'}</p></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">${own?`<button class="btn" data-act="profile">Edit profile</button>`:`<button class="btn" data-act="follow" data-u="${u.id}">${fol?'Following ✓':'Follow'}</button><button class="btn ghost" data-act="msguser" data-u="${u.id}">Message</button>`}<button class="btn ghost" data-act="share" data-k="artist" data-id="${u.id}">↗ Share</button></div></div>
+  ${ach.length?`<div class="row" style="gap:6px;margin:6px 0">${ach.map(a=>`<span class="tag" title="${esc(a[1])}">${a[0]} ${esc(a[1])}</span>`).join('')}</div>`:''}
+  <p class="small muted">${ws.length} artworks · <a href="#" data-act="noop">${fs.loaded?fs.followers:'…'} followers</a> · <a href="#" data-act="noop">${fs.loaded?fs.following:'…'} following</a> · ${avLocal?avLocal.toFixed(1)+' average mark':(ws.some(w=>w.shared)?'marks load in each artwork':'no marks yet')}</p>
+  ${pendingIn.length?`<div class="notice" style="margin:8px 0 0"><b>Follow requests</b>${pendingIn.map(r=>{const ru=byChatId(r.from);return `<div class="row" style="margin-top:6px"><span>${esc(ru.name)} wants to follow you</span><span><button class="btn sm" data-act="followaccept" data-id="${r.id}">Accept</button> <button class="btn ghost sm" data-act="followdecline" data-id="${r.id}">Decline</button></span></div>`}).join('')}</div>`:''}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">${own?`<button class="btn" data-act="profile">Edit profile</button>`:`${followBtn}<button class="btn ghost" data-act="msguser" data-u="${u.id}">Message</button><button class="btn ghost sm" data-act="reportopen" data-k="user" data-id="${u.id}">🚩</button>`}<button class="btn ghost" data-act="share" data-k="artist" data-id="${u.id}">↗ Share</button></div></div>
   <h2 style="margin-top:26px">Artworks</h2>${ws.length?`<div class="grid">${ws.map(workCard).join('')}</div>`:'<div class="card empty">No artworks yet.</div>'}</section>`;
 }
 
 /* work detail */
 function workModal(id){
-  const w=getW(id);if(!w)return;const u=getU(w.uid),m=me(),own=m&&m.id===w.uid,a=avg(w),fav=m&&m.favs.includes(w.id);
-  const mine=m&&w.ratings.find(r=>r.u===m.id),TL={comment:'Comment',suggestion:'Suggestion',tip:'How to improve'};
+  const w=getW(id);if(!w)return;const u=getU(w.uid),m=me(),own=m&&(m.chatId===w.uid||m.id===w.uid);
+  if(w.shared)S.openWork(id);
+  const a=avg(w),cnt=ratingsCount(w),fav=m&&m.favs.includes(w.id);
+  const mineStar=w.shared?((S.ratingCache[w.id]||{}).mine||0):((m&&w.ratings.find(r=>r.u===m.id))||{}).s||0;
+  const cmts=w.shared?S.commentCache[w.id]:w.comments;
+  const TL={comment:'Comment',suggestion:'Suggestion',tip:'How to improve'};
   modal(`<div class="two"><div>${vids[w.id]?`<video src="${vids[w.id]}" controls autoplay muted loop playsinline></video>`:''}<img src="${w.img}" alt="${esc(w.title)}" style="${vids[w.id]?'margin-top:8px':''}">
     ${w.updates.map(x=>`<div class="cm"><b>Update · ${timeAgo(x.t)}</b><p class="small">${esc(x.note)}</p><img src="${x.img}" alt="Update to ${esc(w.title)}"></div>`).join('')}
     ${w.hasVid&&!vids[w.id]?'<p class="small muted">The process video is only kept for the session it was uploaded in (demo storage).</p>':''}</div>
-  <div><h2>${esc(w.title)}</h2><p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${avatar(u,26)}<span>${ulink(u)} · ${esc(u.country)}</span> ${tierBadge(u)} <span class="tag">${CATS[w.cat]}</span></p>
-    <p class="datemeta" style="margin:0 0 6px">🕒 Posted ${fmtDateTime(w.created)} · ${w.views} views</p><p class="stars" style="font-size:1.2rem">${a?starsTxt(a):'☆☆☆☆☆'} <span class="muted small">${a?a.toFixed(1):'–'} from ${w.ratings.length} marks</span></p>
+  <div><h2>${esc(w.title)}</h2><p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${avatar(u,26)}<span>${ulink(u)} · ${esc(u.country)}</span> ${tierBadge(u)} <span class="tag">${CATS[w.cat]}</span>${w.shared?'<span class="tag">🌍 shared</span>':''}</p>
+    <p class="datemeta" style="margin:0 0 6px">🕒 Posted ${fmtDateTime(w.created)} · ${w.views} views</p><p class="stars" style="font-size:1.2rem">${a?starsTxt(a):'☆☆☆☆☆'} <span class="muted small">${a?a.toFixed(1):'–'} from ${cnt} mark${cnt===1?'':'s'}</span></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button class="btn ghost sm" data-act="share" data-k="work" data-id="${w.id}">↗ Share</button><button class="btn ghost sm" data-act="fav" data-id="${w.id}" data-m="1">${fav?'♥ Saved':'♡ Save'}</button>
-    ${own?`<button class="btn sm" data-act="updateopen" data-id="${w.id}">Post update (+5)</button>${/^data:image\/jpeg/.test(w.img)?`<button class="btn ghost sm" data-act="askai" data-id="${w.id}">✨ AI review</button>`:''}<button class="btn danger sm" data-act="delworkask" data-id="${w.id}">Delete</button>`:`<button class="btn ghost sm" data-act="msguser" data-u="${u.id}">💬 Message artist</button>`}</div>
-    ${own?'':`<p class="small" style="margin-bottom:2px">${mine?'Your mark (tap to change):':'Give your mark:'}</p><div class="rate">${[1,2,3,4,5].map(s=>`<button class="${mine&&mine.s>=s?'on':''}" data-act="rate" data-id="${w.id}" data-s="${s}" aria-label="${s} stars">★</button>`).join('')}</div>`}
+    ${own?`<button class="btn sm" data-act="updateopen" data-id="${w.id}">Post update (+5)</button>${/^data:image\/jpeg/.test(w.img)?`<button class="btn ghost sm" data-act="askai" data-id="${w.id}">✨ AI review</button>`:''}<button class="btn danger sm" data-act="delworkask" data-id="${w.id}">Delete</button>`:`<button class="btn ghost sm" data-act="msguser" data-u="${u.id}">💬 Message artist</button><button class="btn ghost sm" data-act="reportopen" data-k="work" data-id="${w.id}">🚩 Report</button>`}</div>
+    ${own?'':`<p class="small" style="margin-bottom:2px">${mineStar?'Your mark (tap to change):':'Give your mark:'}</p><div class="rate">${[1,2,3,4,5].map(s=>`<button class="${mineStar>=s?'on':''}" data-act="rate" data-id="${w.id}" data-s="${s}" aria-label="${s} stars">★</button>`).join('')}</div>`}
     ${w.ai?`<div class="aibox"><div class="kicker" style="font-size:1.2rem">✨ AI review · ${w.ai.overall}/10</div><p class="small" style="margin:0 0 6px">${esc(w.ai.verdict)}</p>${w.ai.strengths&&w.ai.strengths.length?`<p class="small" style="margin:0 0 4px"><b>Works:</b> ${w.ai.strengths.slice(0,2).map(esc).join('; ')}</p>`:''}${w.ai.improvements&&w.ai.improvements.length?`<p class="small" style="margin:0 0 4px"><b>Improve:</b> ${w.ai.improvements.slice(0,2).map(esc).join('; ')}</p>`:''}${w.ai.price&&w.ai.price.high?`<p class="small" style="margin:0"><b>Suggested price:</b> ${curFmt(w.ai.price.low,w.ai.price.currency)} to ${curFmt(w.ai.price.high,w.ai.price.currency)} (estimate)</p>`:''}</div>`:''}
     <h3 style="margin-top:14px">Feedback</h3>
     <form data-form="comment" data-id="${w.id}"><label class="f">Type<select name="type"><option value="suggestion">Suggestion</option><option value="tip">How to improve</option><option value="comment">Comment</option></select></label>
     <label class="f">Your feedback<textarea name="text" required maxlength="500" placeholder="Be specific: what works, what to change next"></textarea></label><button class="btn sm">Post feedback</button></form>
-    ${w.comments.length?[...w.comments].reverse().map(c=>`<div class="cm"><b>${esc(getU(c.u).name)}</b> <span class="tag">${TL[c.type]}</span> <span class="muted small" title="${esc(fmtDateTime(c.t))}">${timeAgo(c.t)}</span><p style="margin:.3em 0 0">${esc(c.text)}</p></div>`).join(''):'<p class="muted small" style="margin-top:12px">No feedback yet. Be the first.</p>'}
+    ${cmts===null||cmts===undefined?'<p class="small muted" style="margin-top:12px">Loading feedback…</p>':(cmts.length?[...cmts].reverse().map(c=>`<div class="cm"><b>${esc(getU(c.u).name)}</b> <span class="tag">${TL[c.type]||'Comment'}</span> <span class="muted small" title="${esc(fmtDateTime(c.t))}">${timeAgo(c.t)}</span><p style="margin:.3em 0 0">${esc(c.text)}</p></div>`).join(''):'<p class="muted small" style="margin-top:12px">No feedback yet. Be the first.</p>')}
   </div></div>`,true);
 }
 
@@ -823,10 +866,10 @@ function shareModal(k,id){
 
 /* listing modal */
 function listingModal(id){
-  const l=getL(id);if(!l)return;const u=getU(l.uid),m=me(),own=m&&m.id===l.uid;
+  const l=getL(id);if(!l)return;const u=getU(l.uid),m=me(),own=m&&(m.chatId===l.uid||m.id===l.uid);
   modal(`<div class="two"><div><img src="${l.img}" alt="${esc(l.title)}"></div><div><h2>${esc(l.title)}</h2><p style="font-size:1.5rem;font-family:var(--display);font-weight:700;margin-bottom:.3em">${money(l.price)}</p>
   <p><span class="tag">${esc(l.cat)}</span> <span class="datemeta">🕒 Listed ${fmtDateTime(l.created)}</span></p><p>${esc(l.desc)}</p><p class="small" style="display:flex;gap:8px;align-items:center">${avatar(u,26)}<span>Seller: ${ulink(u)} · ${esc(u.country)}</span></p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">${own?`<button class="btn danger sm" data-act="dellistask" data-id="${l.id}">Delete listing</button>`:`<button class="btn" data-act="contact" data-id="${l.id}">💬 Message seller</button><button class="btn ghost" data-act="commopen" data-artist="${l.uid}" data-t="${esc(l.title)}">Custom order</button>`}<button class="btn ghost" data-act="share" data-k="listing" data-id="${l.id}">↗ Share</button></div></div></div>`,true);
+  <div style="display:flex;gap:8px;flex-wrap:wrap">${own?`<button class="btn danger sm" data-act="dellistask" data-id="${l.id}">Delete listing</button>`:`<button class="btn" data-act="contact" data-id="${l.id}">💬 Message seller</button><button class="btn ghost" data-act="commopen" data-artist="${l.uid}" data-t="${esc(l.title)}">Custom order</button><button class="btn ghost sm" data-act="reportopen" data-k="listing" data-id="${l.id}">🚩</button>`}<button class="btn ghost" data-act="share" data-k="listing" data-id="${l.id}">↗ Share</button></div></div></div>`,true);
 }
 
 /* challenges + battles */
@@ -900,7 +943,7 @@ function pageSupplies(){
 /* commissions */
 function commCard(c){
   const m=me(),a=getU(c.artist),b=getU(c.buyer),rel=c.ms.filter(x=>x.state==='released').reduce((s,x)=>s+c.total*x.pct/100,0),done=c.ms.every(x=>x.state==='released');
-  const asA=m&&(c.artist===m.id||demoBoth),asB=m&&(c.buyer===m.id||demoBoth);
+  const mineId=m&&(m.chatId||m.id);const asA=m&&(c.artist===mineId||(demoBoth&&!c.shared)),asB=m&&(c.buyer===mineId||(demoBoth&&!c.shared));
   return `<div class="card pad" style="margin-bottom:16px"><div class="row"><h3>${esc(c.title)}</h3><span class="tag">${done?'Completed':'In progress'}</span></div>
   <p class="small muted">Started ${fmtDate(c.created)} · Buyer ${esc(b.name)} · Artist ${esc(a.name)} · Total ${money(c.total)} · Released ${money(rel)} · Held in escrow ${money(c.total-rel)}</p><p class="small">${esc(c.brief)}</p>
   ${c.ms.map((x,i)=>`<div class="ms"><div class="dot ${x.state}">${x.state==='released'?'✓':i+1}</div><div><b>${MS_DEF[i][0]}</b> <span class="muted small">· ${x.pct}% (${money(c.total*x.pct/100)})</span>
@@ -912,7 +955,7 @@ function commCard(c){
 function pageCommissions(){
   const m=me();
   if(!m)return `<section class="sect" style="padding-top:26px"><h1>Custom commissions</h1><p class="muted">Log in to place or receive protected orders.</p><button class="btn" data-act="authopen" data-t="login">Log in</button></section>`;
-  const mine=db.commissions.filter(c=>c.buyer===m.id||c.artist===m.id);
+  const mineId=m.chatId||m.id,mine=db.commissions.filter(c=>c.buyer===m.id||c.artist===m.id||c.buyer===mineId||c.artist===mineId);
   return `<section class="sect" style="padding-top:26px"><div class="row"><div><h1 style="font-size:clamp(1.9rem,4vw,2.7rem)">Custom commissions</h1><p class="lead">Money stays in escrow and is released in three steps: 30% after the rough sketch, 50% after the final painting, 20% after delivery.</p></div><button class="btn" data-act="commopen">New commission</button></div>
   <div class="notice">Payments here are simulated. Before real money moves, connect a payment provider that supports escrow, such as Stripe Connect.</div>
   <label class="chk"><input type="checkbox" data-act="demoboth" ${demoBoth?'checked':''}> Demo mode: let me press both the artist and buyer buttons so I can test the flow alone</label><div style="margin-top:14px">
@@ -986,7 +1029,7 @@ C.init=async()=>{
     C.cdb=cdb;C.usr=usr;C.me=id;C.loadPrefs();
     const v=await usr.me();C.pf[id]={id,name:v.name,avatarUrl:v.avatarUrl,color:v.color};
     await C.loadKeys();await C.publishKey();
-    C.status='live';C.pxInit();
+    C.status='live';C.pxInit();S.init(C.cdb,C.me);
     C.unsubT=cdb.collection('threads').where('mem_'+id,'==',true).onSnapshot(s=>C.onThreads(s),e=>{C.status='off';C.err=(e&&e.code)||'error';C.paint()});
     try{localStorage.setItem('artmark_chat_on','1')}catch(e){}
     C.paint();C.handlePending();
@@ -1119,7 +1162,7 @@ C.bubble=(m,t,fresh)=>{
   const canCopy=!t.shield&&['text',undefined].includes(p.type);
   return `<div class="msg ${mine?'me':''} ${fresh?'fresh':''}" data-mid="${esc(m.id)}"><button class="mm" data-act="msgmenu" aria-label="Message options">⋯</button>${nameLine}${body}${rxh}<div class="tm" title="${esc(fmtDateTime(m.t))}">${tm(m.t)} ${tick}</div>
   <div class="mact"><span class="rxpick">${['👍','❤️','😂','😮','😢','🙏'].map(e=>`<button data-act="creact" data-m="${esc(m.id)}" data-e="${e}">${e}</button>`).join('')}</span>
-  <button data-act="creply" data-m="${esc(m.id)}">Reply</button>${canCopy?`<button data-act="ccopymsg" data-m="${esc(m.id)}">Copy</button>`:''}<button data-act="cdelme" data-m="${esc(m.id)}">Delete for me</button>${mine?`<button data-act="cdelall" data-m="${esc(m.id)}">Delete for everyone</button>`:''}</div></div>`;
+  <button data-act="creply" data-m="${esc(m.id)}">Reply</button>${canCopy?`<button data-act="ccopymsg" data-m="${esc(m.id)}">Copy</button>`:''}${!mine?`<button data-act="reportopen" data-k="message" data-id="${esc(m.id)}" data-th="${esc(t.id)}">Report</button>`:''}<button data-act="cdelme" data-m="${esc(m.id)}">Delete for me</button>${mine?`<button data-act="cdelall" data-m="${esc(m.id)}">Delete for everyone</button>`:''}</div></div>`;
 };
 C.paintMsgs=()=>{
   const el=$('#msgs'),t=C.thr(C.cur);if(!el||!t||C.isLocked(t.id))return;
@@ -1197,9 +1240,10 @@ C.send=async text=>{
 C.sys=(tid,o)=>C.sendTo(tid,{type:'sys',...o});
 
 /* ---- start chats ---- */
-C.dm=async other=>{
+C.dm=async(other,opts)=>{
   if(!other||other===C.me)return toast('Pick another person.');
   if(C.status!=='live')return toast('Chat is not connected in this view.');
+  if(!(opts&&opts.skipGate)&&!S.canMessage(other))return modal(`<h2>Follow first to message</h2><p>This artist only receives messages from people they have accepted a follow request from.</p><button class="btn" data-act="followreq" data-u="${esc(other)}">Send follow request</button></p>`);
   const tid='d_'+[C.me,other].sort().join('_'),ref=C.cdb.doc('threads/'+tid);
   try{
     const kd=await C.cdb.doc('chat_keys/'+other).get();
@@ -1300,12 +1344,13 @@ function pageContacts(){
     ${m.contacts.length?m.contacts.map(c=>{const wa=waLink(c.phone);return `<div class="crow">${avatar({name:c.name},42)}<div class="tx"><b>${esc(c.name)}</b><br><span class="small muted">${c.email?`✉️ <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:''} ${c.phone?` · 📱 ${esc(c.phone)}`:''}</span>${c.note?`<br><span class="small">${esc(c.note)}</span>`:''}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">${c.uid&&String(c.uid).length>6?`<button class="btn sm" data-act="chatdm" data-u="${esc(c.uid)}">💬 Chat</button>`:''}${wa?`<a class="btn sm" style="text-decoration:none;background:#25D366;color:#073b1a" href="${wa}" target="_blank" rel="noopener noreferrer">WhatsApp</a>`:''}<button class="btn ghost sm" data-act="editcontact" data-id="${c.id}">Edit</button><button class="btn danger sm" data-act="delcontactask" data-id="${c.id}">Remove</button></div></div>`}).join(''):'<div class="empty">No contacts saved yet.</div>'}</div></section>`;
 }
-function chatWith(userId){
+function chatWith(userId,skipGate){
   const u=getU(userId);
   if(u.seed){toast('This is a sample artist and cannot chat. Real artists appear once they open Artmark Chat.');return}
   if(!u.chatId){toast('This artist has not connected to chat yet.');return}
+  if(!skipGate&&C.status==='live'&&!S.canMessage(u.chatId))return modal(`<h2>Follow first to message</h2><p>This artist only receives messages from people they have accepted a follow request from.</p><button class="btn" data-act="followreq" data-u="${esc(u.chatId)}">Send follow request</button></p>`);
   closeModalQuiet();location.hash='#/chat';
-  const go=()=>C.dm(u.chatId);C.started?go():(C.init().then(go))
+  const go=()=>C.dm(u.chatId,{skipGate});C.started?go():(C.init().then(go))
 }
 function linkChatId(){const m=me();if(m&&C.status==='live'&&m.chatId!==C.me){m.chatId=C.me;save()}}
 
@@ -1479,8 +1524,9 @@ const SBA={
   async logout(){await SB.auth.signOut();SBA.onAuth(null);toast('Logged out')},
   onAuth(session,opt={}){
     if(!session){const u=me();if(u&&u.sb){db.session=null;save()}C.reset();location.hash='#/feed';render();return}
-    const au=session.user,md=au.user_metadata||{};let u=db.users.find(x=>x.chatId===au.id);
-    if(!u){u={id:uid('u'),name:md.name||String(au.email).split('@')[0],email:au.email,hash:'',country:md.country||'Other',phone:md.phone||'',bio:'',joined:Date.now(),points:0,contacts:[],following:[],favs:[],tasks:{},claimed:[],chatId:au.id,sb:true};db.users.push(u)}
+    const au=session.user,md=au.user_metadata||{};let u=db.users.find(x=>x.chatId===au.id||x.id===au.id);
+    if(!u){u={id:au.id,name:md.name||String(au.email).split('@')[0],email:au.email,hash:'',country:md.country||'Other',phone:md.phone||'',bio:'',joined:Date.now(),points:0,contacts:[],following:[],favs:[],tasks:{},claimed:[],chatId:au.id,sb:true};db.users.push(u)}
+    else if(u.id!==au.id){u.chatId=au.id}
     db.session=u.id;save();C.reset();
     if(opt.silent){closeModalQuiet();render();return}
     afterLogin(u,opt.remember!==false,opt.kind||'login');
@@ -1499,8 +1545,129 @@ const SBA={
 C.reset=()=>{
   C.pxReset();try{C.unsubT&&C.unsubT();C.unsubM&&C.unsubM()}catch(e){}
   Object.assign(C,{started:false,status:'init',cdb:null,usr:null,me:null,threads:[],pf:{},gname:{},prev:{},msgs:[],cur:null,unsubT:null,unsubM:null,kc:new Map(),gk:new Map(),unlocked:new Set(),prefs:{hidden:{},cleared:{},gone:{},locked:{}},err:'',reply:null,draft:''});
+  S.reset();
   if(route().page==='chat')C.init();
 };
+
+/* ================= SHARED SOCIAL DATA (profiles, works, listings, orders, follows, reports) =================
+   Mirrors the chat module's pattern: reuses C.cdb once chat is live, so the SAME code also runs unchanged
+   inside a claude.ai artifact preview (window.claude's real db capability) and on the deployed Supabase site. */
+const S={cdb:null,me:null,started:false,admin:false,live:false,
+  profiles:{},works:[],listings:[],orders:[],reqIn:[],reqOut:[],reports:[],
+  _buy:[],_sell:[],ratingCache:{},commentCache:{},followCache:{},unsub:[],_openWork:null,_pushT:null};
+
+const upsertById=(arr,obj)=>{const i=arr.findIndex(x=>x.id===obj.id);if(i<0)arr.push(obj);else arr[i]=obj;return arr};
+
+S.paint=()=>{const p=route().page;if(['feed','artist','people','reports','commissions','market','dashboard'].includes(p))render()};
+
+S.init=(cdb,me)=>{
+  if(S.started)return;S.started=true;S.cdb=cdb;S.me=me;S.live=true;
+  S.pushProfile();
+  S.unsub.push(cdb.collection('profiles_pub').onSnapshot(s=>{S.profiles={};s.docs.forEach(d=>S.profiles[d.id]=d.data());S.mergeProfiles();S.paint()},e=>{S.err='profiles:'+((e&&e.code)||'error')}));
+  S.unsub.push(cdb.collection('works').orderBy('created','desc').limit(300).onSnapshot(s=>{S.works=s.docs.map(d=>({id:d.id,shared:true,updates:[],comments:[],ratings:[],views:0,shares:0,...d.data()}));S.mergeWorks();S.paint()},e=>{S.err='works:'+((e&&e.code)||'error')}));
+  S.unsub.push(cdb.collection('listings').orderBy('created','desc').limit(200).onSnapshot(s=>{S.listings=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeListings();S.paint()}));
+  S.unsub.push(cdb.collection('orders').where('buyer','==',me).onSnapshot(s=>{S._buy=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeOrders()}));
+  S.unsub.push(cdb.collection('orders').where('artist','==',me).onSnapshot(s=>{S._sell=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeOrders()}));
+  S.unsub.push(cdb.collection('follow_requests').where('target','==',me).onSnapshot(s=>{S.reqIn=s.docs.map(d=>({id:d.id,...d.data()}));S.paint()},e=>{}));
+  S.unsub.push(cdb.collection('follow_requests').where('from','==',me).onSnapshot(s=>{S.reqOut=s.docs.map(d=>({id:d.id,...d.data()}));S.paint()},e=>{}));
+  S.unsub.push(cdb.collection('reports').onSnapshot(s=>{S.reports=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.t-a.t);S.admin=S.reports.some(r=>r.reporter!==me);S.paint()},e=>{S.reports=[]}));
+};
+S.reset=()=>{try{S.unsub.forEach(u=>u&&u())}catch(e){}
+  Object.assign(S,{cdb:null,me:null,started:false,admin:false,live:false,profiles:{},works:[],listings:[],orders:[],reqIn:[],reqOut:[],reports:[],_buy:[],_sell:[],ratingCache:{},commentCache:{},followCache:{},unsub:[],_openWork:null});
+};
+
+/* ---- profile sync: makes every real signed-up artist show up everywhere (feed, directory, leaderboard) ---- */
+S.pushProfile=()=>{
+  clearTimeout(S._pushT);S._pushT=setTimeout(async()=>{
+    const m=me();if(!m||!S.cdb)return;
+    try{await S.cdb.doc('profiles_pub/'+S.me).set({name:m.name,country:m.country||'',bio:m.bio||'',points:m.points||0,joined:m.joined||Date.now()})}catch(e){}
+  },400);
+};
+S.mergeProfiles=()=>{
+  Object.entries(S.profiles).forEach(([id,p])=>{
+    let u=db.users.find(x=>x.chatId===id)||(id===S.me?me():null)||db.users.find(x=>x.id===id);
+    if(!u){db.users.push({id,name:p.name||'Artist',email:'',hash:'',country:p.country||'',bio:p.bio||'',phone:'',joined:p.joined||Date.now(),points:p.points||0,contacts:[],following:[],favs:[],tasks:{},claimed:[],chatId:id,sb:true,shared:true})}
+    else{u.chatId=u.chatId||id;u.shared=true;if(id!==S.me){u.name=p.name||u.name;u.country=p.country||u.country;u.bio=p.bio||u.bio;u.points=p.points||u.points}}
+  });
+};
+S.mergeWorks=()=>{S.works.forEach(w=>upsertById(db.works,w))};
+S.mergeListings=()=>{S.listings.forEach(l=>upsertById(db.listings,l))};
+S.mergeOrders=()=>{const map=new Map();[...S._buy,...S._sell].forEach(o=>map.set(o.id,o));S.orders=[...map.values()];S.orders.forEach(o=>upsertById(db.commissions,o));S.paint()};
+
+/* ---- ratings: one document per rater, so a second vote overwrites instead of stacking ---- */
+S.loadRatings=(workId,force)=>{
+  if(!S.cdb)return;
+  const cur=S.ratingCache[workId];
+  if(cur&&(cur.loading||(!force&&Date.now()-(cur.fetchedAt||0)<15000)))return;
+  S.ratingCache[workId]={...(cur||{avg:0,count:0}),loading:true};
+  S.cdb.collection('works/'+workId+'/ratings').limit(1000).get().then(s=>{
+    const rows=s.docs.map(d=>d.data());const count=rows.length,sum=rows.reduce((a,r)=>a+(+r.stars||0),0);
+    const mineDoc=rows.find((r,i)=>s.docs[i].id===S.me);
+    S.ratingCache[workId]={avg:count?sum/count:0,count,mine:mineDoc?mineDoc.stars:0,loading:false,fetchedAt:Date.now()};
+    if(S._openWork===workId)workModal(workId);else S.paint();
+  }).catch(()=>{S.ratingCache[workId]={avg:0,count:0,loading:false,fetchedAt:Date.now()}});
+};
+S.rate=async(workId,stars)=>{
+  if(!S.cdb)return;
+  try{await S.cdb.doc('works/'+workId+'/ratings/'+S.me).set({stars,t:Date.now()});S.loadRatings(workId,true)}
+  catch(e){toast('Could not save your mark: '+((e&&(e.code||e.message))||'error'))}
+};
+/* ---- comments/feedback, shared ---- */
+S.loadComments=(workId,force)=>{
+  if(!S.cdb||(!force&&S.commentCache[workId]))return;
+  S.cdb.collection('works/'+workId+'/comments').orderBy('t','desc').limit(200).get().then(s=>{
+    S.commentCache[workId]=s.docs.map(d=>({id:d.id,...d.data()}));
+    if(S._openWork===workId)workModal(workId);else S.paint();
+  }).catch(()=>{if(!S.commentCache[workId])S.commentCache[workId]=[]});
+};
+S.addComment=async(workId,type,text)=>{
+  if(!S.cdb)return;
+  S.commentCache[workId]=[...(S.commentCache[workId]||[]),{id:'tmp'+Date.now(),u:S.me,type,text,t:Date.now()}];S.paint();
+  try{await S.cdb.collection('works/'+workId+'/comments').add({u:S.me,type,text,t:Date.now()});S.loadComments(workId,true)}
+  catch(e){toast('Could not post feedback: '+((e&&(e.code||e.message))||'error'))}
+};
+S.openWork=workId=>{
+  const fresh=S._openWork!==workId;S._openWork=workId;
+  const w=getW(workId);if(w&&w.shared){S.loadRatings(workId,fresh);S.loadComments(workId,fresh)}
+};
+S.closeWork=()=>{S._openWork=null};
+
+/* ---- follow requests (private-account style: message only after an accepted request) ---- */
+S.sendFollowRequest=async target=>{
+  if(!S.cdb||target===S.me)return;
+  if(S.reqOut.some(r=>r.target===target)){toast('You already sent a request to this artist');return}
+  try{await S.cdb.collection('follow_requests').add({from:S.me,target,status:'pending',t:Date.now()});toast('Follow request sent')}
+  catch(e){toast('Could not send the request: '+((e&&(e.code||e.message))||'error'))}
+};
+S.respondFollow=async(reqId,accept)=>{
+  try{await S.cdb.doc('follow_requests/'+reqId).update({status:accept?'accepted':'declined',respondedAt:Date.now()});toast(accept?'Request accepted':'Request declined')}
+  catch(e){toast('Could not respond: '+((e&&(e.code||e.message))||'error'))}
+};
+S.unfollow=async reqId=>{try{await S.cdb.doc('follow_requests/'+reqId).delete()}catch(e){toast('Could not remove: '+((e&&(e.code||e.message))||'error'))}};
+S.myStatusWith=target=>{const o=S.reqOut.find(r=>r.target===target);return o?o.status:null};
+S.theirStatusWith=from=>{const i=S.reqIn.find(r=>r.from===from);return i?i.status:null};
+S.isConnected=other=>S.reqOut.some(r=>r.target===other&&r.status==='accepted')||S.reqIn.some(r=>r.from===other&&r.status==='accepted');
+S.canMessage=other=>!S.live||S.isConnected(other);
+S.followStats=uid=>{
+  if(uid===S.me)return{followers:S.reqIn.filter(r=>r.status==='accepted').length,following:S.reqOut.filter(r=>r.status==='accepted').length,loaded:true};
+  const c=S.followCache[uid];if(c)return c;
+  S.followCache[uid]={followers:0,following:0,loaded:false};
+  Promise.all([
+    S.cdb.collection('follow_requests').where('target','==',uid).where('status','==','accepted').limit(500).get(),
+    S.cdb.collection('follow_requests').where('from','==',uid).where('status','==','accepted').limit(500).get()
+  ]).then(([a,b])=>{S.followCache[uid]={followers:a.size,following:b.size,loaded:true};S.paint()}).catch(()=>{S.followCache[uid]={followers:0,following:0,loaded:true}});
+  return S.followCache[uid];
+};
+
+/* ---- reports: the safe, private alternative to reading anyone's messages. Visible only to the
+   reporter and to admins (people listed in app_admins, added by the site owner in Supabase). ---- */
+S.submitReport=async(type,targetId,reason,note,extra)=>{
+  if(!S.cdb)return toast('Log in to report content');
+  try{await S.cdb.collection('reports').add({type,targetId:String(targetId),reason,note:String(note||'').slice(0,500),reporter:S.me,t:Date.now(),status:'open',...(extra||{})});toast('Thank you — sent for review. Only you and the site admin can see this.')}
+  catch(e){toast('Could not send the report: '+((e&&(e.code||e.message))||'error'))}
+};
+S.resolveReport=async id=>{try{await S.cdb.doc('reports/'+id).update({status:'resolved',resolvedAt:Date.now(),resolvedBy:S.me})}catch(e){toast('Could not update: '+((e&&(e.code||e.message))||'error'))}};
+
 
 
 /* ================= SETUP CHECK (#/status) ================= */
@@ -1531,6 +1698,7 @@ async function runStatus(){
   if(window.SB&&session){
     try{const r=await SB.from('docs').select('path').limit(1);add(r.error?'bad':'ok','Database tables ready (docs)',r.error?'Run supabase.sql in Supabase > SQL Editor. Message: '+(r.error.message||r.error.code):'')}catch(e){add('bad','Database tables ready (docs)','Could not reach Supabase.')}
     try{const r=await SB.from('profiles').select('id').limit(1);add(r.error?'bad':'ok','Profiles table ready',r.error?'Run supabase.sql again.':'')}catch(e){}
+    try{const r=await SB.rpc('is_admin',{u:session.user.id});add(r.error?'bad':'ok','Social features database update',r.error?'Run the v2 additions at the end of supabase.sql in Supabase > SQL Editor, then try again.':'')}catch(e){add('bad','Social features database update','Run the v2 additions at the end of supabase.sql in Supabase > SQL Editor, then try again.')}
   }
   const h=await J('/api/health');
   if(h.ok&&h.j){
@@ -1545,11 +1713,50 @@ async function runStatus(){
   el.innerHTML=rows.map(r=>`<div class="strow"><span class="stic">${ico[r.st]}</span><div><b>${esc(r.label)}</b>${r.hint?`<div class="sthint">${esc(r.hint)}</div>`:''}</div></div>`).join('');
 }
 
+/* ---- achievements (computed, not stored) ---- */
+function achievements(u,ws){
+  const list=[];
+  if(u.points>=700)list.push(['🏆','Grandmaster']);else if(u.points>=350)list.push(['🥈','Master']);else if(u.points>=150)list.push(['🎖️','Artisan']);
+  if(ws.length>=1)list.push(['🎨','First upload']);if(ws.length>=10)list.push(['🖼️','10 artworks']);
+  const marks=ws.reduce((s,w)=>s+ratingsCount(w),0);if(marks>=10)list.push(['⭐','10+ marks received']);if(marks>=50)list.push(['🌟','50+ marks received']);
+  if((db.battles||[]).some(b=>b.resolved&&b.winner&&getW(b[b.winner])&&getW(b[b.winner]).uid===u.id))list.push(['⚔️','Battle winner']);
+  return list;
+}
+
+/* ---- community directory: every real signed-up artist, on every device ---- */
+function pagePeople(){
+  if(C.status!=='live')return `<section class="sect" style="padding-top:26px"><h1 style="font-size:clamp(1.9rem,4vw,2.7rem)">Community</h1><p class="lead">Log in to see every artist who has joined Artmark for real.</p><button class="btn" data-act="authopen" data-t="login">Log in</button></section>`;
+  const real=db.users.filter(u=>u.shared).sort((a,b)=>b.points-a.points);
+  return `<section class="sect" style="padding-top:26px"><h1 style="font-size:clamp(1.9rem,4vw,2.7rem)">Community</h1><p class="lead">${real.length} real ${real.length===1?'artist has':'artists have'} signed up and connected to Artmark.</p>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${real.length?real.map(personCard).join(''):'<div class="card empty">Nobody has connected yet on this device. Ask a friend to sign up and open Chat once.</div>'}</div></section>`;
+}
+function personCard(u){
+  return `<a class="card pad" href="#/artist/${u.id}" style="display:flex;gap:12px;align-items:center;text-decoration:none;color:inherit"><span class="avwrap">${avatar(u,48)}${C.isOnline&&C.isOnline(u.chatId)?'<i class="avdot" title="online"></i>':''}</span><div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)}</b><span class="small muted">${esc(u.country)} · ${tier(u.points)}</span></div></a>`;
+}
+
+/* ---- reports: private to the reporter and to admins (see README to make yourself an admin) ---- */
+function pageReports(){
+  if(!me())return `<section class="sect" style="padding-top:26px"><h1>Reports</h1><p class="muted">Log in to see this.</p><button class="btn" data-act="authopen" data-t="login">Log in</button></section>`;
+  if(C.status!=='live')return `<section class="sect" style="padding-top:26px"><h1>Reports</h1><p class="muted">Connect chat first (see the <a href="#/status">Setup check</a>) to use reports.</p></section>`;
+  const rows=S.reports||[],isAdmin=S.admin,open=rows.filter(r=>r.status==='open'),closed=rows.filter(r=>r.status!=='open');
+  return `<section class="sect" style="padding-top:26px"><h1 style="font-size:clamp(1.9rem,4vw,2.7rem)">${isAdmin?'All reports':'Reports you sent'}</h1>
+  <p class="lead">${isAdmin?'Only you can see this list, because your account is listed as an admin.':'Only you and the site admin can see reports you send.'}</p>
+  ${open.length?`<h3>Open</h3>${open.map(r=>reportRow(r,isAdmin)).join('')}`:'<div class="card empty">No open reports.</div>'}
+  ${closed.length?`<h3 style="margin-top:18px">Resolved</h3>${closed.map(r=>reportRow(r,isAdmin)).join('')}`:''}</section>`;
+}
+function reportRow(r,isAdmin){
+  const who=isAdmin?getU(r.reporter):null;
+  return `<div class="card pad" style="margin-bottom:12px"><div class="row"><b>${esc(r.type)} report · ${esc(r.reason)}</b><span class="tag">${esc(r.status)}</span></div>
+  <p class="small muted" title="${esc(fmtDateTime(r.t))}">${who?`By ${esc(who.name)} · `:''}${timeAgo(r.t)} · target: ${esc(r.targetId)}</p>
+  ${r.note?`<p class="small">${esc(r.note)}</p>`:''}${r.text?`<div class="cm"><b>Reported message</b><p class="small">${esc(r.text)}</p></div>`:''}
+  ${isAdmin&&r.status==='open'?`<button class="btn sm" data-act="reportresolve" data-id="${r.id}">Mark resolved</button>`:''}</div>`;
+}
+
 /* dashboard */
 function pageDashboard(){
   const m=me();
   if(!m)return `<section class="sect" style="padding-top:26px"><h1>Analytics</h1><p class="muted">Log in to see who views your work.</p><button class="btn" data-act="authopen" data-t="login">Log in</button></section>`;
-  const a=an(m.id),mine=db.works.filter(w=>w.uid===m.id),all=mine.flatMap(w=>w.ratings),avgAll=all.length?all.reduce((s,r)=>s+r.s,0)/all.length:0,shares=mine.reduce((s,w)=>s+w.shares,0);
+  const a=an(m.id),myId=m.chatId||m.id,mine=db.works.filter(w=>w.uid===m.id||w.uid===myId),all=mine.flatMap(w=>w.shared?[]:w.ratings),avgAll=all.length?all.reduce((s,r)=>s+r.s,0)/all.length:0,shares=mine.reduce((s,w)=>s+w.shares,0);
   const tot=Object.values(a.countries).reduce((s,x)=>s+x,0)||1,top=Object.entries(a.countries).sort((x,y)=>y[1]-x[1]).slice(0,6);
   const since=dperiod==='all'?0:Date.now()-(+dperiod)*864e5;const ser=all.filter(r=>r.t>=since).sort((x,y)=>x.t-y.t);let sum=0;const pts=ser.map((r,i)=>{sum+=r.s;return sum/(i+1)});
   const W=600,H=200,P=30,X=i=>pts.length>1?P+i/(pts.length-1)*(W-2*P):W/2,Y=v=>H-P-(v/5)*(H-2*P);
@@ -1615,10 +1822,11 @@ const A={
     <p class="err" id="uperr"></p><button class="btn" style="width:100%">Publish (+10 points)</button></form>`)},
   updateopen:d=>modal(`<h2>Post an update</h2><form data-form="update" data-id="${d.id}"><label class="f">What changed?<textarea name="note" required maxlength="300"></textarea></label><label class="f">New photo<input type="file" name="img" accept="image/*" required></label><p class="err" id="uperr"></p><button class="btn" style="width:100%">Post update (+5 points)</button></form>`),
   delworkask:d=>confirmModal('Delete this artwork?','It will be removed from the gallery, challenges and battles. This cannot be undone.','delwork',{id:d.id}),
-  delwork:d=>{db.works=db.works.filter(w=>w.id!==d.id);db.battles=db.battles.filter(b=>b.a!==d.id&&b.b!==d.id);Object.values(db.challenges).forEach(c=>c.entries=c.entries.filter(e=>e.wid!==d.id));db.users.forEach(u=>u.favs=u.favs.filter(x=>x!==d.id));save();closeModal();render();toast('Artwork deleted')},
+  delwork:d=>{const delw=getW(d.id);db.works=db.works.filter(w=>w.id!==d.id);db.battles=db.battles.filter(b=>b.a!==d.id&&b.b!==d.id);Object.values(db.challenges).forEach(c=>c.entries=c.entries.filter(e=>e.wid!==d.id));db.users.forEach(u=>u.favs=u.favs.filter(x=>x!==d.id));save();if(delw&&delw.shared&&C.status==='live')S.cdb.doc('works/'+d.id).delete().catch(()=>{});closeModal();render();toast('Artwork deleted')},
   dellistask:d=>confirmModal('Delete this listing?','Buyers will no longer see it.','dellist',{id:d.id}),
-  dellist:d=>{db.listings=db.listings.filter(l=>l.id!==d.id);save();closeModal();render();toast('Listing deleted')},
-  rate:d=>{if(!requireLogin())return;const w=getW(d.id),m=me(),s=+d.s;if(w.uid===m.id)return;
+  dellist:d=>{const dl=getL(d.id);db.listings=db.listings.filter(l=>l.id!==d.id);save();if(dl&&dl.shared&&C.status==='live')S.cdb.doc('listings/'+d.id).delete().catch(()=>{});closeModal();render();toast('Listing deleted')},
+  rate:d=>{if(!requireLogin())return;const w=getW(d.id),m=me(),s=+d.s;if(w.uid===m.id||w.uid===(m.chatId||m.id))return;
+    if(w.shared&&C.status==='live'){S.rate(w.id,s);bump('rate');workModal(w.id);return}
     const ex=w.ratings.find(r=>r.u===m.id);if(ex){ex.s=s;ex.t=Date.now()}else{w.ratings.push({u:m.id,s,t:Date.now()});addPoints(w.uid,s*2,'someone marked your work');bump('rate')}
     save();render();workModal(w.id)},
   /* share */
@@ -1627,14 +1835,14 @@ const A={
   copylink:async d=>{const s=shareInfo(d.k,d.id);try{await navigator.clipboard.writeText(s.url)}catch(e){const i=$('#slink');i.select();try{document.execCommand('copy')}catch(x){}}toast('Link copied');A.sharedone(d)},
   nativeshare:d=>{const s=shareInfo(d.k,d.id);navigator.share({title:s.title,text:s.line,url:s.url}).then(()=>A.sharedone(d)).catch(()=>{})},
   /* challenges */
-  enterchallenge:d=>{if(!requireLogin())return;const m=me(),mine=db.works.filter(w=>w.uid===m.id&&w.cat===d.c),ch=challenge();
+  enterchallenge:d=>{if(!requireLogin())return;const m=me(),myId=m.chatId||m.id,mine=db.works.filter(w=>(w.uid===m.id||w.uid===myId)&&w.cat===d.c),ch=challenge();
     if(!mine.length){toast(`Upload a ${CATS[d.c].toLowerCase()} piece first`);return}
     const free=mine.filter(w=>!ch.entries.some(e=>e.wid===w.id));
     modal(`<h2>Enter ${THEMES[d.c][weekInfo().n%4]}</h2><form data-form="enter" data-c="${d.c}"><label class="f">Choose an artwork<select name="w">${free.map(w=>`<option value="${w.id}">${esc(w.title)}</option>`).join('')||'<option value="">All entered already</option>'}</select></label><button class="btn" style="width:100%">Enter (+15 points)</button></form>`)},
   votechallenge:d=>{if(!requireLogin())return;const m=me(),ch=challenge(),e=ch.entries.find(x=>x.wid===d.w);
     if(ch.entries.some(x=>x.cat===e.cat&&x.votes[m.id])){toast('You already voted in this category');return}
     e.votes[m.id]=1;save();render()},
-  battleopen:()=>{if(!requireLogin())return;const m=me(),mine=db.works.filter(w=>w.uid===m.id),others=db.works.filter(w=>w.uid!==m.id);
+  battleopen:()=>{if(!requireLogin())return;const m=me(),myId=m.chatId||m.id,mine=db.works.filter(w=>w.uid===m.id||w.uid===myId),others=db.works.filter(w=>w.uid!==m.id&&w.uid!==myId);
     if(!mine.length){toast('Upload a piece first');return}
     modal(`<h2>Start a battle</h2><form data-form="battle"><label class="f">Your artwork<select name="a">${mine.map(w=>`<option value="${w.id}">${esc(w.title)} (${CATS[w.cat]})</option>`).join('')}</select></label>
     <label class="f">Opponent's artwork (same category)<select name="b">${others.map(w=>`<option value="${w.id}">${esc(w.title)} by ${esc(getU(w.uid).name)} (${CATS[w.cat]})</option>`).join('')}</select></label>
@@ -1647,7 +1855,7 @@ const A={
     <label class="f">Description<textarea name="desc" required maxlength="400"></textarea></label>
     <label class="f">Photo<input type="file" name="img" accept="image/*" required></label><p class="err" id="uperr"></p><button class="btn" style="width:100%">List it</button></form>`)},
   mfilter:d=>{mfilter=d.c;if(route().page!=='market')location.hash='#/market';else render()},
-  contact:d=>{const l=getL(d.id);chatWith(l.uid)},
+  contact:d=>{const l=getL(d.id);chatWith(l.uid,true)},
   commopen:d=>{if(!requireLogin())return;const m=me();
     modal(`<h2>New commission</h2><form data-form="comm"><label class="f">Artist<select name="artist">${db.users.filter(u=>u.id!==m.id).map(u=>`<option value="${u.id}" ${d.artist===u.id?'selected':''}>${esc(u.name)} (${esc(u.country)})</option>`).join('')}</select></label>
     <label class="f">What do you want made?<input name="title" required maxlength="80" value="${esc(d.t||'')}"></label>
@@ -1656,7 +1864,19 @@ const A={
     <p class="small muted">Your budget is held in escrow: 30% is released after the rough sketch, 50% after the final painting and 20% after delivery.</p><button class="btn" style="width:100%">Place order</button></form>`)},
   demoboth:(d,el)=>{demoBoth=el.checked;render()},
   mssubmit:d=>modal(`<h2>Submit for approval</h2><form data-form="mssubmit" data-c="${d.c}" data-i="${d.i}"><label class="f">Note for the buyer<textarea name="note" required maxlength="300"></textarea></label><label class="f">Photo <small>(optional)</small><input type="file" name="img" accept="image/*"></label><button class="btn" style="width:100%">Send</button></form>`),
-  msapprove:d=>{const c=db.commissions.find(x=>x.id===d.c),i=+d.i;c.ms[i].state='released';c.ms[i].at=Date.now();if(c.ms[i+1])c.ms[i+1].state='active';addPoints(c.artist,10,'milestone approved');save();render();toast(`Released ${money(c.total*c.ms[i].pct/100)} to the artist (simulated)`)},
+  noop:(d,e)=>{e&&e.preventDefault&&e.preventDefault()},
+  followreq:d=>{if(!requireLogin())return;S.sendFollowRequest(d.u);render()},
+  followaccept:d=>{S.respondFollow(d.id,true);render()},
+  followdecline:d=>{S.respondFollow(d.id,false);render()},
+  unfollowreq:d=>{S.unfollow(d.id);render()},
+  reportopen:d=>{if(!requireLogin())return;
+    const labels={work:'artwork',listing:'listing',user:'artist',message:'message'};
+    modal(`<h2>Report this ${labels[d.k]||d.k}</h2><form data-form="report" data-k="${d.k}" data-id="${esc(d.id)}" data-th="${esc(d.th||'')}">
+    <label class="f">Reason<select name="reason"><option>Spam</option><option>Harassment or abuse</option><option>Stolen art / copyright</option><option>Scam or fraud</option><option>Inappropriate content</option><option>Other</option></select></label>
+    <label class="f">Details ${d.k==='message'?'<small>(the message text is attached automatically)</small>':''}<textarea name="note" maxlength="500" placeholder="What happened?"></textarea></label>
+    <p class="small muted">Only you and the site admin can see this report.</p><button class="btn" style="width:100%">Send report</button></form>`)},
+  reportresolve:d=>{S.resolveReport(d.id)},
+  msapprove:d=>{const c=db.commissions.find(x=>x.id===d.c),i=+d.i;c.ms[i].state='released';c.ms[i].at=Date.now();if(c.ms[i+1])c.ms[i+1].state='active';addPoints(c.artist,10,'milestone approved');save();if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});render();toast(`Released ${money(c.total*c.ms[i].pct/100)} to the artist (simulated)`)},
   mschangesopen:d=>modal(`<h2>Ask for changes</h2><form data-form="mschanges" data-c="${d.c}" data-i="${d.i}"><label class="f">What should change?<textarea name="text" required maxlength="200"></textarea></label><button class="btn" style="width:100%">Send request</button></form>`),
   claim:d=>{if(!requireLogin())return;const m=me();if(m.points<+d.p)return;const code=d.b.replace(/[^A-Z]/g,'').slice(0,3)+'-'+Math.random().toString(36).slice(2,8).toUpperCase();m.claimed.push({brand:d.b,code});save();render();toast('Voucher claimed (sample code)')},
   sample:()=>{const m=me(),a=an(m.id),cs=['United States','France','Japan','Pakistan','Germany','Brazil'];for(let i=0;i<60;i++){const c=cs[Math.floor(Math.random()*cs.length*Math.random()*1.4)%cs.length];a.countries[c]=(a.countries[c]||0)+1;a.views++;a.impr+=3}save();render()},
@@ -1713,7 +1933,7 @@ const A={
     const f=el.files&&el.files[0];el.value='';if(!f||!C.cur)return;
     try{let url=URL.createObjectURL(f),img=await dataImg(url,640,.6);if(img.length>110000)img=await dataImg(url,440,.5);URL.revokeObjectURL(url);
       if(img.length>130000)return toast('That photo is too large to send.');await C.sendTo(C.cur,{type:'image',img,text:''})}catch(e){toast('Could not read that photo')}},
-  cshareart:()=>{const m=me(),mine=m?db.works.filter(w=>w.uid===m.id):[];
+  cshareart:()=>{const m=me(),myId=m&&(m.chatId||m.id),mine=m?db.works.filter(w=>w.uid===m.id||w.uid===myId):[];
     if(!mine.length)return toast('Log in to Artmark and upload an artwork first');
     modal(`<h2>Share an artwork</h2><div class="sgrid">${mine.map(w=>`<button class="sbtn" data-act="cpostshare" data-id="${w.id}"><img src="${w.img}" alt="" width="44" height="33" style="object-fit:cover;border-radius:6px">${esc(w.title)}</button>`).join('')}</div>`)},
   cpostshare:async d=>{const w=getW(d.id);let thumb='';try{thumb=await dataImg(w.img,140,.6)}catch(e){}closeModal();await C.sendTo(C.cur,{type:'share',share:{k:'work',id:w.id,title:w.title,thumb}})},
@@ -1834,7 +2054,7 @@ const F={
     if(!u||u.hash!==await hash(email,d.get('pw')))return setErr('autherr','Email or password is incorrect.');
     db.session=u.id;save();afterLogin(u,d.get('remember')==='on','login');
   },
-  profile(f){const d=new FormData(f),m=me();m.name=d.get('name').trim();m.country=d.get('country');m.phone=d.get('phone').trim();m.bio=d.get('bio').trim();save();closeModal();render();toast('Profile saved')},
+  profile(f){const d=new FormData(f),m=me();m.name=d.get('name').trim();m.country=d.get('country');m.phone=d.get('phone').trim();m.bio=d.get('bio').trim();save();if(C.status==='live')S.pushProfile();closeModal();render();toast('Profile saved')},
   async upload(f){
     const d=new FormData(f),m=me(),btn=f.querySelector('button');btn.disabled=true;
     try{
@@ -1843,17 +2063,23 @@ const F={
       const w={id:uid('w'),uid:m.id,title:d.get('title').trim(),cat:d.get('cat'),img,hasVid,created:Date.now(),updates:[],ratings:[],comments:[],views:0,shares:0};
       db.works.push(w);if(url)vids[w.id]=url;
       if(!save()){db.works.pop();btn.disabled=false;return}
-      addPoints(m.id,10,'artwork uploaded');bump('upload');save();closeModal();render();
+      addPoints(m.id,10,'artwork uploaded');bump('upload');save();
+      if(C.status==='live'&&img.length<240000){w.shared=true;S.cdb.doc('works/'+w.id).set({uid:S.me,title:w.title,cat:w.cat,img,hasVid,created:w.created,views:0,shares:0}).catch(()=>{toast('Saved on this device, but could not sync to the shared gallery yet.')})}
+      else if(C.status==='live')toast('Saved on this device. That photo is a bit large to sync to the shared gallery — try a smaller one next time.');
+      closeModal();render();
     }catch(e){btn.disabled=false;setErr('uperr',e.message)}
   },
   async update(f){
     const d=new FormData(f),w=getW(f.dataset.id);
     try{w.updates.push({img:await fileToImg(d.get('img')),note:d.get('note').trim(),t:Date.now()});
-      addPoints(w.uid,5,'artwork updated');bump('update');save();render();workModal(w.id)}catch(e){setErr('uperr',e.message)}
+      addPoints(w.uid,5,'artwork updated');bump('update');save();
+      if(w.shared&&C.status==='live')S.cdb.doc('works/'+w.id).update({updates:w.updates}).catch(()=>{});
+      render();workModal(w.id)}catch(e){setErr('uperr',e.message)}
   },
   comment(f){
-    if(!requireLogin())return;const d=new FormData(f),w=getW(f.dataset.id),m=me(),type=d.get('type');
-    w.comments.push({u:m.id,type,text:d.get('text').trim(),t:Date.now()});
+    if(!requireLogin())return;const d=new FormData(f),w=getW(f.dataset.id),m=me(),type=d.get('type'),text=d.get('text').trim();
+    if(w.shared&&C.status==='live')S.addComment(w.id,type,text);
+    else w.comments.push({u:m.id,type,text,t:Date.now()});
     if(type!=='comment'&&w.uid!==m.id){addPoints(m.id,2,'helpful suggestion');bump('suggest')}
     save();render();workModal(w.id);
   },
@@ -1866,19 +2092,32 @@ const F={
   },
   async sell(f){
     const d=new FormData(f),m=me();
-    try{db.listings.unshift({id:uid('l'),uid:m.id,title:d.get('title').trim(),cat:d.get('cat'),price:+d.get('price'),desc:d.get('desc').trim(),img:await fileToImg(d.get('img')),created:Date.now()});
-      if(save()){closeModal();render();toast('Listed. Buyers can now message you.')}else db.listings.shift()}catch(e){setErr('uperr',e.message)}
+    try{const l={id:uid('l'),uid:m.id,title:d.get('title').trim(),cat:d.get('cat'),price:+d.get('price'),desc:d.get('desc').trim(),img:await fileToImg(d.get('img')),created:Date.now()};
+      db.listings.unshift(l);
+      if(!save()){db.listings.shift();return}
+      if(C.status==='live'){l.shared=true;S.cdb.doc('listings/'+l.id).set({uid:S.me,title:l.title,cat:l.cat,price:l.price,desc:l.desc,img:l.img,created:l.created}).catch(()=>{toast('Saved on this device, but could not sync to the shared marketplace yet.')})}
+      closeModal();render();toast('Listed. Buyers can now message you.')}catch(e){setErr('uperr',e.message)}
   },
   comm(f){
-    const d=new FormData(f),m=me(),total=+d.get('total');
-    db.commissions.unshift({id:uid('c'),buyer:m.id,artist:d.get('artist'),title:d.get('title').trim(),brief:d.get('brief').trim(),total,created:Date.now(),ms:MS_DEF.map((x,i)=>({pct:x[1],state:i?'locked':'active'}))});
-    save();closeModal();location.hash='#/commissions';render();toast('Order placed. Funds are held in escrow (simulated).');
+    const d=new FormData(f),m=me(),total=+d.get('total'),o={id:uid('c'),buyer:m.id,artist:d.get('artist'),title:d.get('title').trim(),brief:d.get('brief').trim(),total,created:Date.now(),ms:MS_DEF.map((x,i)=>({pct:x[1],state:i?'locked':'active'}))};
+    db.commissions.unshift(o);save();
+    if(C.status==='live'){o.shared=true;S.cdb.doc('orders/'+o.id).set({buyer:S.me,artist:o.artist,title:o.title,brief:o.brief,total:o.total,created:o.created,ms:o.ms}).catch(()=>{toast('Saved on this device, but could not sync this order yet.')})}
+    closeModal();location.hash='#/commissions';render();toast('Order placed. Funds are held in escrow (simulated).');
   },
   async mssubmit(f){
     const d=new FormData(f),c=db.commissions.find(x=>x.id===f.dataset.c),s=c.ms[+f.dataset.i],im=d.get('img');
-    s.note=d.get('note').trim();if(im&&im.size)s.img=await fileToImg(im,700);s.state='submitted';s.at=Date.now();delete s.changes;save();closeModal();render();
+    s.note=d.get('note').trim();if(im&&im.size)s.img=await fileToImg(im,700);s.state='submitted';s.at=Date.now();delete s.changes;save();
+    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});
+    closeModal();render();
   },
-  mschanges(f){const c=db.commissions.find(x=>x.id===f.dataset.c),s=c.ms[+f.dataset.i];s.state='active';s.changes=new FormData(f).get('text').trim();save();closeModal();render()},
+  mschanges(f){const c=db.commissions.find(x=>x.id===f.dataset.c),s=c.ms[+f.dataset.i];s.state='active';s.changes=new FormData(f).get('text').trim();save();
+    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});
+    closeModal();render()},
+  report(f){
+    const d=new FormData(f),k=f.dataset.k,id=f.dataset.id,extra={};
+    if(k==='message'){const msg=C.msgs.find(x=>x.id===id);extra.threadId=f.dataset.th;extra.text=(msg&&msg.plain&&msg.plain.text)||'';if(msg)extra.from=msg.from}
+    S.submitReport(k,id,d.get('reason'),d.get('note'),extra);closeModal();
+  },
   contact(f){
     const d=new FormData(f),name=d.get('name').trim(),email=d.get('email').trim(),phone=d.get('phone').trim();
     if(!email&&!phone)return setErr('uperr','Add an email or a phone number.');

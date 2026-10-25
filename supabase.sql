@@ -80,3 +80,49 @@ create trigger on_auth_user_created after insert on auth.users for each row exec
 do $$ begin
   begin alter publication supabase_realtime add table public.docs; exception when duplicate_object then null; end;
 end $$;
+
+-- ================= v2 additions: social features (profiles, ratings, follows, orders, listings, reports) =================
+-- Everything below reuses the same generic docs table above. No new tables for app data, except two small ones:
+
+-- 1) Admin list — who may see and resolve reports. You add yourself after signing up (see README).
+create table if not exists public.app_admins (user_id uuid primary key references auth.users(id) on delete cascade);
+alter table public.app_admins enable row level security;
+drop policy if exists app_admins_read on public.app_admins;
+create policy app_admins_read on public.app_admins for select to authenticated using (true);
+-- No insert/update/delete policy for 'authenticated' on purpose: only you, using the Supabase SQL Editor
+-- (which runs with full database access), can grant admin. The app itself can never grant it.
+
+create or replace function public.is_admin(u uuid) returns boolean
+language sql stable as $$ select exists(select 1 from public.app_admins where user_id = u) $$;
+
+-- 2) Reports stay private: only the person who filed a report and admins may read it.
+drop policy if exists docs_read on public.docs;
+create policy docs_read on public.docs for select to authenticated using (
+  left(path,8) <> 'reports/' or owner = auth.uid() or public.is_admin(auth.uid())
+);
+
+-- 3) Two extra people need to update specific documents they don't own:
+--    - the TARGET of a follow request, to accept or decline it
+--    - the BUYER or SELLER of an order, to submit/approve a milestone
+--    - an admin, to mark a report resolved
+drop policy if exists docs_update on public.docs;
+create policy docs_update on public.docs for update to authenticated
+  using (
+    (left(path,8) = 'threads/' and left(path,10) <> 'chat_keys/' and position('/msgs/' in path) = 0)
+    or owner = auth.uid()
+    or position('/msgs/' in path) > 0
+    or (left(path,16) = 'follow_requests/' and data->>'target' = auth.uid()::text)
+    or (left(path,7) = 'orders/' and (data->>'buyer' = auth.uid()::text or data->>'seller' = auth.uid()::text))
+    or (left(path,8) = 'reports/' and public.is_admin(auth.uid()))
+  )
+  with check (left(path,10) <> 'chat_keys/' or path = 'chat_keys/' || auth.uid()::text);
+
+-- 4) One request per (from, target) pair — stops a person spamming the same request.
+create unique index if not exists follow_req_pair on public.docs (((data->>'from')), ((data->>'target')))
+  where left(path,16) = 'follow_requests/';
+
+-- 5) Make the new collections' common lookups fast.
+create index if not exists docs_data_target on public.docs (((data->>'target'))) where left(path,16) = 'follow_requests/';
+create index if not exists docs_data_from   on public.docs (((data->>'from')))   where left(path,16) = 'follow_requests/';
+create index if not exists docs_data_buyer  on public.docs (((data->>'buyer')))  where left(path,7)  = 'orders/';
+create index if not exists docs_data_seller on public.docs (((data->>'seller'))) where left(path,7)  = 'orders/';
