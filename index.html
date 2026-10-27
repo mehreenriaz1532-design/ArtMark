@@ -13,75 +13,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Nunito:wght@400;500;600;700;800&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  /* SPA Page View Toggle */
-.spa-page {
-  width: 100%;
-  max-width: 935px;
-  margin: 0 auto;
-  padding: 20px 15px;
-}
-
-/* Profile Layout */
-.profile-header {
-  display: flex;
-  gap: 40px;
-  align-items: center;
-  padding-bottom: 30px;
-  border-bottom: 1px solid #dbdbdb;
-}
-
-.avatar-box img {
-  width: 130px;
-  height: 130px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid #e0e0e0;
-}
-
-.profile-title-row {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 15px;
-}
-
-.profile-stats {
-  display: flex;
-  gap: 30px;
-  margin-bottom: 15px;
-  font-size: 16px;
-}
-
-.posts-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-  margin-top: 20px;
-}
-
-.posts-grid img {
-  width: 100%;
-  height: 250px;
-  object-fit: cover;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.posts-grid img:hover {
-  transform: scale(1.02);
-}
-
-/* Mobile Responsive */
-@media (max-width: 600px) {
-  .profile-header {
-    flex-direction: column;
-    text-align: center;
-  }
-  .posts-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
 :root{
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
@@ -135,6 +66,8 @@ nav.main a:hover{color:var(--ink)}
 nav.main a.on{color:var(--ink);border-color:var(--accent)}
 nav.main .ic{font-size:1rem}
 .bdg{background:var(--accent);color:var(--on-accent);font-size:.68rem;font-weight:700;border-radius:99px;min-width:18px;height:18px;display:inline-grid;place-items:center;padding:0 5px}
+.bellwrap{position:relative;text-decoration:none}
+.bellwrap .bdg{position:absolute;top:-4px;right:-4px}
 .who{display:flex;align-items:center;gap:10px}
 .chip{border:1px solid var(--line);padding:4px 12px;font-size:.84rem;background:var(--bg);border-radius:99px;white-space:nowrap}
 .av{width:var(--s,36px);height:var(--s,36px);border-radius:50%;background:hsl(var(--h) 42% 40%);color:#fff;display:inline-grid;place-items:center;font-weight:700;font-size:calc(var(--s,36px)*.42);flex:none;font-family:var(--display)}
@@ -488,51 +421,6 @@ nav.main a::after{bottom:0}
   <div class="who" id="who"></div>
 </div></header>
 <main class="wrap" id="app"></main>
-  <!-- ================= PROFILE SECTION ================= -->
-<section id="profile-page" class="spa-page" style="display: none;">
-  <div class="profile-container">
-    
-    <!-- Profile Header Top Info -->
-    <div class="profile-header">
-      <div class="avatar-box">
-        <img id="p-avatar" src="https://via.placeholder.com/150" alt="Profile Picture">
-      </div>
-
-      <div class="profile-info">
-        <div class="profile-title-row">
-          <h2 id="p-username">@artist_name</h2>
-          
-          <!-- Dynamic Action Buttons -->
-          <div id="profile-actions-btn">
-            <!-- Buttons JavaScript se dynamically change hongay -->
-          </div>
-        </div>
-
-        <!-- Instagram Style Stats Counter -->
-        <div class="profile-stats">
-          <div class="stat-item"><b id="p-posts-count">0</b> <span>posts</span></div>
-          <div class="stat-item"><b id="p-followers-count">0</b> <span>followers</span></div>
-          <div class="stat-item"><b id="p-following-count">0</b> <span>following</span></div>
-        </div>
-
-        <div class="profile-bio-box">
-          <h4 id="p-fullname">Full Name</h4>
-          <p id="p-bio">Artist Bio will appear here...</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Gallery / Posts Grid -->
-    <div class="profile-tab-header">
-      <button class="active">POSTS</button>
-    </div>
-    
-    <div id="p-posts-grid" class="posts-grid">
-      <!-- User posts dynamically dynamic load hongay -->
-    </div>
-
-  </div>
-</section>
 <footer class="wrap">Demo build: accounts, art and chats are saved inside this browser only. To make Artmark truly global (every artist sees every upload and chats between different devices), connect a shared backend such as Supabase or Firebase. · <a href="#/status">Setup check</a></footer>
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>
@@ -829,7 +717,8 @@ function render(){
   $('#nav').innerHTML=ROUTES.map(x=>`<a href="#/${x[0]}" class="${page===x[0]?'on':''}"><span class="ic" aria-hidden="true">${x[2]}</span>${x[1]}${x[0]==='chat'&&un?`<span class="bdg">${un}</span>`:''}</a>`).join('')
     +(S.admin?`<a href="#/reports" class="${page==='reports'?'on':''}"><span class="ic" aria-hidden="true">🚩</span>Reports${rn?`<span class="bdg">${rn}</span>`:''}</a>`:'');
   const dark=document.documentElement.dataset.theme==='dark'||(!document.documentElement.dataset.theme&&matchMedia('(prefers-color-scheme: dark)').matches);
-  $('#who').innerHTML=`<button class="iconbtn" data-act="theme" aria-label="Switch light or dark theme" title="Light / dark">${dark?'☀️':'🌙'}</button>`+(m?`<span class="chip">#${rankPos(m.id)} · ${tier(m.points)} · ${m.points} pts</span><button class="iconbtn" data-act="profile" style="border:0;padding:0" aria-label="Edit my profile">${avatar(m,36)}</button><button class="btn ghost sm" data-act="logout">Log out</button>`
+  const pendingN=(C.status==='live'&&S.reqIn)?S.reqIn.filter(r=>r.status==='pending').length:0;
+  $('#who').innerHTML=`<button class="iconbtn" data-act="theme" aria-label="Switch light or dark theme" title="Light / dark">${dark?'☀️':'🌙'}</button>`+(m?`<span class="chip">#${rankPos(m.id)} · ${tier(m.points)} · ${m.points} pts</span>${pendingN?`<a class="iconbtn bellwrap" href="#/artist/${m.id}" aria-label="${pendingN} follow request${pendingN===1?'':'s'}" title="Follow requests">🔔<span class="bdg">${pendingN}</span></a>`:''}<button class="iconbtn" data-act="profile" style="border:0;padding:0" aria-label="Edit my profile">${avatar(m,36)}</button><button class="btn ghost sm" data-act="logout">Log out</button>`
     :`<button class="btn ghost sm" data-act="authopen" data-t="login">Log in</button><button class="btn sm" data-act="authopen" data-t="signup">Sign up</button>`);
   hookVideos();
   if(page==='chat'&&r.arg!=='contacts'){C.paneKey=null;C.paint();C.handlePending()}
@@ -1668,7 +1557,7 @@ C.reset=()=>{
    inside a claude.ai artifact preview (window.claude's real db capability) and on the deployed Supabase site. */
 const S={cdb:null,me:null,started:false,admin:false,live:false,
   profiles:{},works:[],listings:[],orders:[],reqIn:[],reqOut:[],reports:[],
-  _buy:[],_sell:[],ratingCache:{},commentCache:{},followCache:{},unsub:[],_openWork:null,_pushT:null};
+  _buy:[],_sell:[],ratingCache:{},commentCache:{},followCache:{},unsub:[],_openWork:null,_pushT:null,_seenReq:new Set(),_seenReqReady:false};
 
 const upsertById=(arr,obj)=>{const i=arr.findIndex(x=>x.id===obj.id);if(i<0)arr.push(obj);else arr[i]=obj;return arr};
 
@@ -1682,7 +1571,11 @@ S.init=(cdb,me)=>{
   S.unsub.push(cdb.collection('listings').orderBy('created','desc').limit(200).onSnapshot(s=>{S.listings=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeListings();S.paint()}));
   S.unsub.push(cdb.collection('orders').where('buyer','==',me).onSnapshot(s=>{S._buy=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeOrders()}));
   S.unsub.push(cdb.collection('orders').where('artist','==',me).onSnapshot(s=>{S._sell=s.docs.map(d=>({id:d.id,shared:true,...d.data()}));S.mergeOrders()}));
-  S.unsub.push(cdb.collection('follow_requests').where('target','==',me).onSnapshot(s=>{S.reqIn=s.docs.map(d=>({id:d.id,...d.data()}));S.paint()},e=>{}));
+  S.unsub.push(cdb.collection('follow_requests').where('target','==',me).onSnapshot(s=>{
+    const rows=s.docs.map(d=>({id:d.id,...d.data()}));
+    rows.filter(r=>r.status==='pending'&&!S._seenReq.has(r.id)).forEach(r=>{S._seenReq.add(r.id);if(S._seenReqReady)toast(`${esc(byChatId(r.from).name)} asked to follow you`)});
+    S.reqIn=rows;S._seenReqReady=true;S.paint();
+  },e=>{}));
   S.unsub.push(cdb.collection('follow_requests').where('from','==',me).onSnapshot(s=>{S.reqOut=s.docs.map(d=>({id:d.id,...d.data()}));S.paint()},e=>{}));
   S.unsub.push(cdb.collection('reports').onSnapshot(s=>{S.reports=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.t-a.t);S.admin=S.reports.some(r=>r.reporter!==me);S.paint()},e=>{S.reports=[]}));
 };
@@ -2273,46 +2166,7 @@ load();
 if(!remembered()&&!window.SB){db.session=null;try{localStorage.removeItem('artmark_norem')}catch(e){}save()}
 render();
 if(window.SB)SBA.init();
-  // Function to show profile page (Matched with your HTML IDs)
-async function openUserProfile(userId) {
-  // 1. Hide all other main sections / app view, show profile page
-  const mainApp = document.getElementById('app');
-  if (mainApp) mainApp.style.display = 'none';
-  
-  const profilePage = document.getElementById('profile-page');
-  if (profilePage) profilePage.style.display = 'block';
-
-  // 2. Fetch User Data from Supabase
-  try {
-    const { data: user, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('Error fetching user:', error.message);
-      return;
-    }
-
-    if (user) {
-      // 3. Populate HTML with actual data
-      document.getElementById('p-username').innerText = '@' + (user.username || 'user');
-      document.getElementById('p-fullname').innerText = user.full_name || user.username || 'Artist';
-      document.getElementById('p-bio').innerText = user.bio || 'No bio yet...';
-      document.getElementById('p-avatar').src = user.avatar_url || 'https://via.placeholder.com/150';
-      
-      document.getElementById('p-posts-count').innerText = user.posts_count || 0;
-      document.getElementById('p-followers-count').innerText = user.followers_count || 0;
-      document.getElementById('p-following-count').innerText = user.following_count || 0;
-
-      // 4. Optional: Update Message Button State based on Request Status
-      // updateMessageButtonState(currentUserId, userId);
-    }
-  } catch (err) {
-    console.error('Failed to load profile:', err);
-  }
-}
 </script>
 </body>
 </html>
+
