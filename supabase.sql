@@ -47,11 +47,14 @@ begin
   return r;
 end $$;
 
+-- Fixed merge_doc with upsert to prevent P0002 errors
 create or replace function public.merge_doc(p_path text, p_patch jsonb) returns void
 language plpgsql as $$
 begin
-  update public.docs set data = public.jsonb_deep_merge(data, p_patch), updated_at = now() where path = p_path;
-  if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
+  insert into public.docs (path, parent, data, updated_at)
+  values (p_path, split_part(p_path, '/', 1), p_patch, now())
+  on conflict (path) do update 
+  set data = public.jsonb_deep_merge(public.docs.data, p_patch), updated_at = now();
 end $$;
 
 -- 3) Public profiles (name and country) created automatically at sign-up
@@ -82,29 +85,19 @@ do $$ begin
 end $$;
 
 -- ================= v2 additions: social features (profiles, ratings, follows, orders, listings, reports) =================
--- Everything below reuses the same generic docs table above. No new tables for app data, except two small ones:
-
--- 1) Admin list — who may see and resolve reports. You add yourself after signing up (see README).
 create table if not exists public.app_admins (user_id uuid primary key references auth.users(id) on delete cascade);
 alter table public.app_admins enable row level security;
 drop policy if exists app_admins_read on public.app_admins;
 create policy app_admins_read on public.app_admins for select to authenticated using (true);
--- No insert/update/delete policy for 'authenticated' on purpose: only you, using the Supabase SQL Editor
--- (which runs with full database access), can grant admin. The app itself can never grant it.
 
 create or replace function public.is_admin(u uuid) returns boolean
 language sql stable as $$ select exists(select 1 from public.app_admins where user_id = u) $$;
 
--- 2) Reports stay private: only the person who filed a report and admins may read it.
 drop policy if exists docs_read on public.docs;
 create policy docs_read on public.docs for select to authenticated using (
   left(path,8) <> 'reports/' or owner = auth.uid() or public.is_admin(auth.uid())
 );
 
--- 3) Two extra people need to update specific documents they don't own:
---    - the TARGET of a follow request, to accept or decline it
---    - the BUYER or SELLER of an order, to submit/approve a milestone
---    - an admin, to mark a report resolved
 drop policy if exists docs_update on public.docs;
 create policy docs_update on public.docs for update to authenticated
   using (
@@ -117,12 +110,10 @@ create policy docs_update on public.docs for update to authenticated
   )
   with check (left(path,10) <> 'chat_keys/' or path = 'chat_keys/' || auth.uid()::text);
 
--- 4) One request per (from, target) pair — stops a person spamming the same request.
 create unique index if not exists follow_req_pair on public.docs (((data->>'from')), ((data->>'target')))
   where left(path,16) = 'follow_requests/';
 
--- 5) Make the new collections' common lookups fast.
 create index if not exists docs_data_target on public.docs (((data->>'target'))) where left(path,16) = 'follow_requests/';
-create index if not exists docs_data_from   on public.docs (((data->>'from')))   where left(path,16) = 'follow_requests/';
+create index if not exists docs_data_from    on public.docs (((data->>'from')))    where left(path,16) = 'follow_requests/';
 create index if not exists docs_data_buyer  on public.docs (((data->>'buyer')))  where left(path,7)  = 'orders/';
 create index if not exists docs_data_seller on public.docs (((data->>'seller'))) where left(path,7)  = 'orders/';
