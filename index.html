@@ -1646,11 +1646,15 @@ S.sendFollowRequest=async target=>{
   try{await S.cdb.collection('follow_requests').add({from:S.me,target,status:'pending',t:Date.now()});toast('Follow request sent')}
   catch(e){toast('Could not send the request: '+((e&&(e.code||e.message))||'error'))}
 };
+S.dbErr=(action,e)=>{
+  const code=(e&&(e.code||e.message))||'error';
+  modal(`<h2>Could not ${esc(action)}</h2><p>The database did not accept this change (${esc(code)}).</p><p class="small muted">This almost always means the site's database is missing a recent update. On the site's Supabase project, open SQL Editor and re-run the whole <code>supabase.sql</code> file (running it again is always safe), then try this again. The <a href="#/status">Setup check</a> page will confirm whether this is the problem.</p><button class="btn" data-act="close">OK</button>`);
+};
 S.respondFollow=async(reqId,accept)=>{
   try{await S.cdb.doc('follow_requests/'+reqId).update({status:accept?'accepted':'declined',respondedAt:Date.now()});toast(accept?'Request accepted':'Request declined')}
-  catch(e){toast('Could not respond: '+((e&&(e.code||e.message))||'error'))}
+  catch(e){S.dbErr(accept?'accept this follow request':'decline this follow request',e)}
 };
-S.unfollow=async reqId=>{try{await S.cdb.doc('follow_requests/'+reqId).delete()}catch(e){toast('Could not remove: '+((e&&(e.code||e.message))||'error'))}};
+S.unfollow=async reqId=>{try{await S.cdb.doc('follow_requests/'+reqId).delete()}catch(e){S.dbErr('remove this follow',e)}};
 S.myStatusWith=target=>{const o=S.reqOut.find(r=>r.target===target);return o?o.status:null};
 S.theirStatusWith=from=>{const i=S.reqIn.find(r=>r.from===from);return i?i.status:null};
 S.isConnected=other=>S.reqOut.some(r=>r.target===other&&r.status==='accepted')||S.reqIn.some(r=>r.from===other&&r.status==='accepted');
@@ -1673,7 +1677,7 @@ S.submitReport=async(type,targetId,reason,note,extra)=>{
   try{await S.cdb.collection('reports').add({type,targetId:String(targetId),reason,note:String(note||'').slice(0,500),reporter:S.me,t:Date.now(),status:'open',...(extra||{})});toast('Thank you — sent for review. Only you and the site admin can see this.')}
   catch(e){toast('Could not send the report: '+((e&&(e.code||e.message))||'error'))}
 };
-S.resolveReport=async id=>{try{await S.cdb.doc('reports/'+id).update({status:'resolved',resolvedAt:Date.now(),resolvedBy:S.me})}catch(e){toast('Could not update: '+((e&&(e.code||e.message))||'error'))}};
+S.resolveReport=async id=>{try{await S.cdb.doc('reports/'+id).update({status:'resolved',resolvedAt:Date.now(),resolvedBy:S.me})}catch(e){S.dbErr('mark this report resolved',e)}};
 
 
 
@@ -1883,7 +1887,7 @@ const A={
     <label class="f">Details ${d.k==='message'?'<small>(the message text is attached automatically)</small>':''}<textarea name="note" maxlength="500" placeholder="What happened?"></textarea></label>
     <p class="small muted">Only you and the site admin can see this report.</p><button class="btn" style="width:100%">Send report</button></form>`)},
   reportresolve:d=>{S.resolveReport(d.id)},
-  msapprove:d=>{const c=db.commissions.find(x=>x.id===d.c),i=+d.i;c.ms[i].state='released';c.ms[i].at=Date.now();if(c.ms[i+1])c.ms[i+1].state='active';addPoints(c.artist,10,'milestone approved');save();if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});render();toast(`Released ${money(c.total*c.ms[i].pct/100)} to the artist (simulated)`)},
+  msapprove:d=>{const c=db.commissions.find(x=>x.id===d.c),i=+d.i;c.ms[i].state='released';c.ms[i].at=Date.now();if(c.ms[i+1])c.ms[i+1].state='active';addPoints(c.artist,10,'milestone approved');save();if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(e=>S.dbErr('sync this approval to the artist',e));render();toast(`Released ${money(c.total*c.ms[i].pct/100)} to the artist (simulated)`)},
   mschangesopen:d=>modal(`<h2>Ask for changes</h2><form data-form="mschanges" data-c="${d.c}" data-i="${d.i}"><label class="f">What should change?<textarea name="text" required maxlength="200"></textarea></label><button class="btn" style="width:100%">Send request</button></form>`),
   claim:d=>{if(!requireLogin())return;const m=me();if(m.points<+d.p)return;const code=d.b.replace(/[^A-Z]/g,'').slice(0,3)+'-'+Math.random().toString(36).slice(2,8).toUpperCase();m.claimed.push({brand:d.b,code});save();render();toast('Voucher claimed (sample code)')},
   sample:()=>{const m=me(),a=an(m.id),cs=['United States','France','Japan','Pakistan','Germany','Brazil'];for(let i=0;i<60;i++){const c=cs[Math.floor(Math.random()*cs.length*Math.random()*1.4)%cs.length];a.countries[c]=(a.countries[c]||0)+1;a.views++;a.impr+=3}save();render()},
@@ -2114,11 +2118,11 @@ const F={
   async mssubmit(f){
     const d=new FormData(f),c=db.commissions.find(x=>x.id===f.dataset.c),s=c.ms[+f.dataset.i],im=d.get('img');
     s.note=d.get('note').trim();if(im&&im.size)s.img=await fileToImg(im,700);s.state='submitted';s.at=Date.now();delete s.changes;save();
-    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});
+    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(e=>S.dbErr('sync this submission to the buyer',e));
     closeModal();render();
   },
   mschanges(f){const c=db.commissions.find(x=>x.id===f.dataset.c),s=c.ms[+f.dataset.i];s.state='active';s.changes=new FormData(f).get('text').trim();save();
-    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(()=>{});
+    if(c.shared&&C.status==='live')S.cdb.doc('orders/'+c.id).update({ms:c.ms}).catch(e=>S.dbErr('sync this request to the artist',e));
     closeModal();render()},
   report(f){
     const d=new FormData(f),k=f.dataset.k,id=f.dataset.id,extra={};
@@ -2169,4 +2173,3 @@ if(window.SB)SBA.init();
 </script>
 </body>
 </html>
-
